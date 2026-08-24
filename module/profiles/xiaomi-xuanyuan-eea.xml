@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<deviceProfile schemaVersion="1" id="xiaomi-xuanyuan-eea-android16">
+    <match manufacturer="Xiaomi"
+           product="xuanyuan_eea"
+           sdkMin="36"
+           effectFactory="android.hardware.audio.effect.IFactory/default"/>
+    <effectsHal interfaceVersion="2" abi="arm64-v8a"/>
+    <paths config="/vendor/etc/audio/sku_sun/audio_effects_config.xml"
+           library="/vendor/lib64/soundfx/libaudiofreedomfx.so"/>
+    <controller preferred="output-mix" alternate="stream-default-media"/>
+    <postprocess stream="music"
+                 effect="audiofreedom"
+                 insertAfter="dlb_music_listener"
+                 fallback="true"/>
+    <constraints preserveExistingEffects="true"
+                 requireConfigBackup="true"
+                 verifyFactoryAfterInstall="true"/>
+</deviceProfile>

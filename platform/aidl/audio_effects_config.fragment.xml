@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<audiofreedom>
+    <library name="audiofreedom" path="libaudiofreedomfx.so"/>
+    <effect name="audiofreedom"
+            library="audiofreedom"
+            uuid="2f6e8c10-8d44-4b42-b110-16f3a729ef01"
+            type="a7e03c90-7c3d-4f48-9c8d-497c8f1b1201"/>
+    <postprocess stream="music" apply="audiofreedom" fallback="true"/>
+</audiofreedom>

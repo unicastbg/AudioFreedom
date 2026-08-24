@@ -1,0 +1,13 @@
+AUDIOFREEDOM INDEPENDENT DSP LEGACY/HIDL TEST BUILD
+
+This package contains AudioFreedom's independent DSP core and a clean implementation of
+Android's public legacy audio-effect library interface. It does not contain Sony, Qualcomm,
+Dolby, Creative, or ViPER DSP code or binary components.
+
+This is a capability-guarded ARMv7 effect-process build for compatible 32-bit classic/HIDL
+audio stacks. It validates the active factory ABI and an exact source-configuration
+signature instead of relying on a manufacturer or model allowlist. A project license and
+legal review are still required before public distribution or sale.
+
+The effect is registered for companion-app session-0 control and is not automatically
+attached to individual music sessions by the vendor XML.

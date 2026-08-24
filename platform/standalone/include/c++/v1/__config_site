@@ -1,0 +1,13 @@
+// LLVM libc++ configuration for Android platform/vendor binaries.
+#ifndef _LIBCPP___CONFIG_SITE
+#define _LIBCPP___CONFIG_SITE
+
+#define _LIBCPP_ABI_VERSION 1
+#define _LIBCPP_ABI_NAMESPACE __1
+#define _LIBCPP_HAS_NO_VENDOR_AVAILABILITY_ANNOTATIONS
+#define _LIBCPP_HAS_NO_STD_MODULES
+#define _LIBCPP_HAS_NO_TIME_ZONE_DATABASE
+#define _LIBCPP_PSTL_CPU_BACKEND_THREAD
+#define _LIBCPP_HARDENING_MODE_DEFAULT 2
+
+#endif

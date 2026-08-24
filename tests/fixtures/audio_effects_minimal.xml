@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<audio_effects_conf version="2.0">
+    <libraries>
+        <library name="existing" path="libexisting.so"/>
+    </libraries>
+    <effects>
+        <effect name="existing" library="existing"
+                uuid="11111111-2222-3333-4444-555555555555"/>
+    </effects>
+    <deviceEffects/>
+</audio_effects_conf>

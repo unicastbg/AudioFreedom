@@ -1,0 +1,8 @@
+AUDIOFREEDOM INDEPENDENT DSP TEST BUILD
+
+Bass Foundation is an AudioFreedom implementation using low-band filtering, adaptive
+restraint, soft limiting, and optional harmonic synthesis. It does not contain the
+ViPER-derived Dynamic System implementation or its device coefficient presets.
+
+This remains a development build for the Xiaomi xuanyuan EEA Android 16 profile. A
+project license and legal review are still required before public distribution or sale.

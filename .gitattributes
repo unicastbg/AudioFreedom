@@ -1,0 +1,18 @@
+* text=auto
+
+.gitattributes text eol=lf
+*.sh text eol=lf
+gradlew text eol=lf
+*.bp text eol=lf
+*.mk text eol=lf
+
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+*.png binary
+*.jar binary
+*.apk binary
+*.aab binary
+*.aar binary
+*.so binary
+*.zip binary

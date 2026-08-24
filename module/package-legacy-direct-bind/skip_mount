@@ -1,0 +1,1 @@
+AudioFreedom manages its two guarded bind mounts from post-fs-data.sh.

@@ -1,0 +1,1 @@
+AudioFreedom manages its three device-specific bind mounts from post-fs-data.sh.

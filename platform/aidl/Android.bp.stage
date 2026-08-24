@@ -1,0 +1,19 @@
+package {
+    default_applicable_licenses: [
+        "//vendor/audiofreedom:audiofreedom_license",
+        "hardware_interfaces_license",
+    ],
+}
+
+cc_library_shared {
+    name: "libaudiofreedomfx",
+    defaults: ["aidlaudioeffectservice_defaults"],
+    srcs: [
+        "AudioFreedomEffect.cpp",
+        ":effectCommonFile",
+    ],
+    static_libs: ["libaudiofreedom_dsp"],
+    cpp_std: "c++20",
+    relative_install_path: "soundfx",
+    visibility: ["//visibility:public"],
+}

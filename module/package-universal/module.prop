@@ -1,0 +1,6 @@
+id=audiofreedom
+name=AudioFreedom Universal Audio Stack Test
+version=0.9.0-portable2
+versionCode=26
+author=AudioFreedom
+description=Capability-selected AIDL64, legacy64, or legacy32 DSP integration with AIDL boot-order recovery.

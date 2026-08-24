@@ -1,0 +1,16 @@
+AUDIOFREEDOM UNIVERSAL AUDIO-STACK TEST BUILD
+
+This package contains AudioFreedom's independent DSP core, clean Android AIDL and classic
+audio-effect adapters, and an XML patcher built on Android's platform DOM APIs. It does not
+contain Sony, Xiaomi, Redmi, Samsung, Qualcomm, Dolby, Creative, or ViPER DSP code or binary
+components.
+
+The installer has no manufacturer, model, product, serial-number, or source-XML hash
+allowlist. It selects a backend from the live Effects Factory and process ABI, probes the
+selected AudioFreedom binary, patches copies of the device's own structurally validated
+effects XML files, attaches AIDL processing to the music chain while keeping legacy
+processing controller-owned, preserves the OEM soundfx directory, and activates only
+bind mounts.
+
+This remains a development test build. A project license and legal review are required
+before public distribution or sale.

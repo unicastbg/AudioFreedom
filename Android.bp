@@ -1,0 +1,47 @@
+package {
+    default_applicable_licenses: ["audiofreedom_license"],
+}
+
+license {
+    name: "audiofreedom_license",
+    visibility: ["//visibility:public"],
+    license_kinds: ["legacy_proprietary"],
+}
+
+cc_library_static {
+    name: "libaudiofreedom_dsp",
+    vendor_available: true,
+    srcs: ["core/src/engine.cpp"],
+    export_include_dirs: [
+        "core/include",
+        "protocol/include",
+    ],
+    cpp_std: "c++20",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    visibility: ["//visibility:public"],
+}
+
+cc_binary {
+    name: "audiofreedom-controller",
+    system_ext_specific: true,
+    srcs: ["platform/controller/AudioFreedomController.cpp"],
+    shared_libs: [
+        "framework-permission-aidl-cpp",
+        "libaudioclient",
+        "libbinder",
+        "liblog",
+        "libutils",
+    ],
+    cpp_std: "c++20",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-DAUDIOFREEDOM_CONTROLLER_ANDROID_API=36",
+    ],
+    visibility: ["//visibility:public"],
+}

@@ -1,0 +1,6 @@
+id=audiofreedom
+name=AudioFreedom DSP Proof
+version=0.1.0-dev9
+versionCode=9
+author=AudioFreedom
+description=Android 16 AIDL V3 shared-control proof with fixed -12 dB processing and deterministic rollback. Xiaomi xuanyuan EEA test profile only.
