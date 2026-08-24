@@ -48,7 +48,7 @@ reported AudioFreedom enabled on session 0 with the companion service as its cli
 service bypasses processing whenever Android leaves `MODE_NORMAL`, protecting cellular
 and VoIP call modes without modifying the driver descriptor.
 
-The `portable2` universal package was confirmed to boot and process audio without
+The `0.9.0` universal package was confirmed to boot and process audio without
 Meta-OverlayFS. Its AIDL boot-order recovery is the preferred installation baseline for
 this profile.
 

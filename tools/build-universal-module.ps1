@@ -12,7 +12,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $templateRoot = Join-Path $projectRoot "module\package-universal"
 $buildRoot = Join-Path $projectRoot "module\build-universal"
 $packageRoot = Join-Path $buildRoot "audiofreedom-universal"
-    $zipPath = Join-Path $buildRoot "AudioFreedom-universal-0.9.0-portable2.zip"
+$zipPath = Join-Path $buildRoot "AudioFreedom-universal-0.9.0.zip"
 $utf8NoBom = [Text.UTF8Encoding]::new($false)
 
 $patcher = (& (Join-Path $PSScriptRoot "build-config-patcher.ps1") | Select-Object -Last 1)
@@ -89,7 +89,7 @@ if ($LASTEXITCODE -eq 0) {
 }
 
 $buildInfo = @(
-    "profile=universal-audio-stack-portable2"
+    "profile=universal-audio-stack-0.9.0"
     "selection=live-factory-and-process-abi"
     "config_strategy=device-owned-xml-dom-patch"
     "supported_backends=aidl64,legacy64,legacy32"
