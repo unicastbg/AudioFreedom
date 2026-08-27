@@ -12,8 +12,8 @@ android {
         applicationId = "com.svetlio.audiofreedom"
         minSdk = 35
         targetSdk = 36
-        versionCode = 16
-        versionName = "0.9.0-foundation1"
+        versionCode = 18
+        versionName = "0.9.2-beta"
     }
 
     buildTypes {

@@ -36,7 +36,7 @@ software effect chain.
 - Linked-channel output limiter with configurable ceiling and release
 - Live input, output, and gain-reduction meters
 - Named profiles with optional automatic assignment by connected output
-- Phone speaker, wired, USB, and Bluetooth route awareness in the companion app
+- Phone speaker, wired, USB, HDMI, and Bluetooth route awareness in the app and notification
 - System, light, and dark themes
 - Automatic bypass outside Android's normal audio mode
 

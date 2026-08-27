@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="notification_audiofreedom">#006B55</color>
+    <color name="notification_speaker">#2E7D32</color>
+    <color name="notification_wired">#EF6C00</color>
+    <color name="notification_bluetooth">#1976D2</color>
+    <color name="notification_usb">#00897B</color>
+    <color name="notification_hdmi">#7B1FA2</color>
+</resources>

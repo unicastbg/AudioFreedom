@@ -205,6 +205,8 @@ private class SessionZeroEffectController {
 class AudioFreedomService : Service() {
     private val effectController = SessionZeroEffectController()
     private val meterHandler = Handler(Looper.getMainLooper())
+    private var foregroundStarted = false
+    private var notificationPresentation: NotificationPresentation? = null
     private val meterPoll = object : Runnable {
         override fun run() {
             currentOutputMetrics = effectController.queryOutputMetrics()
@@ -247,7 +249,7 @@ class AudioFreedomService : Service() {
             updateNotification = false,
             forceAssignedProfile = shouldApplyAssignedProfileOnServiceStart(intent?.action),
         )
-        startForeground(NOTIFICATION_ID, createNotification(isPaused = false))
+        updateForegroundNotification(isPaused = audioManager.mode != AudioManager.MODE_NORMAL)
         applyAudioMode(
             audioManager.mode,
             forceSettings = intent?.action == ACTION_APPLY_SETTINGS ||
@@ -300,10 +302,12 @@ class AudioFreedomService : Service() {
             if (currentState != DriverState.Attached) {
                 setRequestedEnabled(this, false)
                 stopForeground(STOP_FOREGROUND_REMOVE)
+                foregroundStarted = false
+                notificationPresentation = null
                 stopSelf()
                 return
             }
-            startForeground(NOTIFICATION_ID, createNotification(isPaused = false))
+            updateForegroundNotification(isPaused = false)
             startMetering()
             Log.i(TAG, "Processing active in normal audio mode")
             return
@@ -312,7 +316,7 @@ class AudioFreedomService : Service() {
         effectController.release()
         stopMetering()
         currentState = probeDriver()
-        startForeground(NOTIFICATION_ID, createNotification(isPaused = true))
+        updateForegroundNotification(isPaused = true)
         Log.i(TAG, "Processing bypassed for audio mode $mode")
     }
 
@@ -326,14 +330,24 @@ class AudioFreedomService : Service() {
         currentOutputMetrics = null
     }
 
-    private fun createNotification(isPaused: Boolean): Notification {
-        val openApp = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            openApp,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
+    private fun updateForegroundNotification(isPaused: Boolean) {
+        val presentation = createNotificationPresentation(isPaused)
+        if (foregroundStarted && presentation == notificationPresentation) {
+            return
+        }
+
+        val notification = createNotification(presentation)
+        if (foregroundStarted) {
+            getSystemService(NotificationManager::class.java)
+                .notify(NOTIFICATION_ID, notification)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+            foregroundStarted = true
+        }
+        notificationPresentation = presentation
+    }
+
+    private fun createNotificationPresentation(isPaused: Boolean): NotificationPresentation {
         val preferences = AppPreferencesStore.load(this)
         val processingState = if (isPaused) "Paused during call" else "Processing enabled"
         val content = if (preferences.showDeviceInNotification) {
@@ -341,12 +355,35 @@ class AudioFreedomService : Service() {
         } else {
             processingState
         }
+        val smallIcon = if (preferences.showDeviceInNotification) {
+            currentAudioRoute.kind.notificationIcon
+        } else {
+            R.drawable.ic_notification_audiofreedom
+        }
+        val iconColor = if (preferences.showDeviceInNotification) {
+            currentAudioRoute.kind.notificationColor
+        } else {
+            R.color.notification_audiofreedom
+        }
+        return NotificationPresentation(content, smallIcon, iconColor)
+    }
+
+    private fun createNotification(presentation: NotificationPresentation): Notification {
+        val openApp = Intent(this, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            openApp,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         return Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(presentation.smallIcon)
+            .setColor(getColor(presentation.iconColor))
             .setContentTitle("AudioFreedom")
-            .setContentText(content)
+            .setContentText(presentation.content)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
             .build()
     }
 
@@ -379,9 +416,8 @@ class AudioFreedomService : Service() {
         }
 
         if (updateNotification && isRequestedEnabled(this)) {
-            startForeground(
-                NOTIFICATION_ID,
-                createNotification(isPaused = audioManager.mode != AudioManager.MODE_NORMAL),
+            updateForegroundNotification(
+                isPaused = audioManager.mode != AudioManager.MODE_NORMAL,
             )
         }
     }
@@ -473,6 +509,32 @@ class AudioFreedomService : Service() {
         }
     }
 }
+
+private data class NotificationPresentation(
+    val content: String,
+    val smallIcon: Int,
+    val iconColor: Int,
+)
+
+private val AudioRouteKind.notificationIcon: Int
+    get() = when (this) {
+        AudioRouteKind.PhoneSpeaker -> R.drawable.ic_notification_speaker
+        AudioRouteKind.WiredHeadphones -> R.drawable.ic_notification_wired
+        AudioRouteKind.Bluetooth -> R.drawable.ic_notification_bluetooth
+        AudioRouteKind.Usb -> R.drawable.ic_notification_usb
+        AudioRouteKind.Hdmi -> R.drawable.ic_notification_hdmi
+        AudioRouteKind.Other -> R.drawable.ic_notification_audiofreedom
+    }
+
+private val AudioRouteKind.notificationColor: Int
+    get() = when (this) {
+        AudioRouteKind.PhoneSpeaker -> R.color.notification_speaker
+        AudioRouteKind.WiredHeadphones -> R.color.notification_wired
+        AudioRouteKind.Bluetooth -> R.color.notification_bluetooth
+        AudioRouteKind.Usb -> R.color.notification_usb
+        AudioRouteKind.Hdmi -> R.color.notification_hdmi
+        AudioRouteKind.Other -> R.color.notification_audiofreedom
+    }
 
 private fun rootCause(error: Throwable): Throwable {
     var cause = error
