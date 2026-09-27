@@ -38,6 +38,7 @@ software effect chain.
 - Named profiles with optional automatic assignment by connected output
 - Phone speaker, wired, USB, HDMI, and Bluetooth route awareness in the app and notification
 - System, light, and dark themes
+- On-demand update checks against the latest public GitHub release
 - Automatic bypass outside Android's normal audio mode
 
 ## Compatibility

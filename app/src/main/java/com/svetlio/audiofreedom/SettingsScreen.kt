@@ -8,17 +8,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.BluetoothAudio
 import androidx.compose.material.icons.rounded.DevicesOther
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.rounded.Usb
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -35,13 +40,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
+
+private sealed interface UpdateSectionState {
+    data object Idle : UpdateSectionState
+    data object Checking : UpdateSectionState
+    data class Available(val version: String, val releaseUrl: String) : UpdateSectionState
+    data class Current(val latestVersion: String) : UpdateSectionState
+    data object Failed : UpdateSectionState
+}
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
@@ -55,7 +71,26 @@ internal fun SettingsScreen(
     modifier: Modifier = Modifier,
 ) {
     var profileMenuExpanded by remember { mutableStateOf(false) }
+    var updateState by remember { mutableStateOf<UpdateSectionState>(UpdateSectionState.Idle) }
+    val updateScope = rememberCoroutineScope()
+    val uriHandler = LocalUriHandler.current
     val assignedProfile = profiles.firstOrNull { it.id == assignedProfileId }
+
+    fun checkForUpdates() {
+        if (updateState == UpdateSectionState.Checking) return
+        updateState = UpdateSectionState.Checking
+        updateScope.launch {
+            updateState = when (val result = AppUpdateChecker.check(BuildConfig.VERSION_NAME)) {
+                is UpdateCheckResult.UpdateAvailable -> UpdateSectionState.Available(
+                    version = result.version,
+                    releaseUrl = result.releaseUrl,
+                )
+                is UpdateCheckResult.UpToDate ->
+                    UpdateSectionState.Current(result.latestVersion)
+                UpdateCheckResult.Failed -> UpdateSectionState.Failed
+            }
+        }
+    }
 
     Column(
         modifier = modifier
@@ -170,6 +205,54 @@ internal fun SettingsScreen(
                     ),
                 ) {
                     Text(theme.label)
+                }
+            }
+        }
+
+        HorizontalDivider(
+            modifier = Modifier.padding(top = 24.dp),
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
+        SettingsSectionTitle("Updates")
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Rounded.SystemUpdate, contentDescription = null)
+            Column(modifier = Modifier.padding(start = 16.dp).weight(1F)) {
+                Text("AudioFreedom ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = when (val state = updateState) {
+                        UpdateSectionState.Idle -> "Check GitHub for a newer release"
+                        UpdateSectionState.Checking -> "Checking GitHub"
+                        is UpdateSectionState.Available -> "Version ${state.version} is available"
+                        is UpdateSectionState.Current -> "Up to date"
+                        UpdateSectionState.Failed -> "Could not check for updates"
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            when (val state = updateState) {
+                UpdateSectionState.Checking -> CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    strokeWidth = 2.dp,
+                )
+                is UpdateSectionState.Available -> TextButton(
+                    onClick = { uriHandler.openUri(state.releaseUrl) },
+                ) {
+                    Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null)
+                    Text("View")
+                }
+                UpdateSectionState.Failed -> TextButton(onClick = ::checkForUpdates) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = null)
+                    Text("Retry")
+                }
+                UpdateSectionState.Idle,
+                is UpdateSectionState.Current,
+                -> TextButton(onClick = ::checkForUpdates) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = null)
+                    Text("Check")
                 }
             }
         }
