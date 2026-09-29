@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,11 +52,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -65,8 +68,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
@@ -81,6 +86,11 @@ class MainActivity : ComponentActivity() {
         val initialEnabled = AudioFreedomService.isRequestedEnabled(this)
         val initialSettings = AudioFreedomSettingsStore.load(this)
         var appPreferences by mutableStateOf(AppPreferencesStore.load(this))
+        AssistantRuntimeManager.initialize(this)
+        AssistantRuntimeManager.updatePolicy(
+            appPreferences.assistantEnabled,
+            appPreferences.assistantKeepWarm,
+        )
         if (initialEnabled) {
             AudioFreedomService.setEnabled(this, true)
         }
@@ -126,6 +136,12 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private enum class ControllerPage {
+    Main,
+    Settings,
+    AssistantSettings,
+}
+
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 private fun ControllerScreen(
@@ -155,11 +171,16 @@ private fun ControllerScreen(
         mutableStateOf(ImmersiveFieldPreset.matching(initialSettings))
     }
     var immersivePresetMenuExpanded by remember { mutableStateOf(false) }
+    var selectedReverbPreset by remember {
+        mutableStateOf(ReverbPreset.matching(initialSettings))
+    }
+    var reverbPresetMenuExpanded by remember { mutableStateOf(false) }
     var outputExpanded by rememberSaveable { mutableStateOf(false) }
     var equalizerExpanded by rememberSaveable { mutableStateOf(false) }
     var dynamicBassExpanded by rememberSaveable { mutableStateOf(false) }
     var detailRecoveryExpanded by rememberSaveable { mutableStateOf(false) }
     var immersiveFieldExpanded by rememberSaveable { mutableStateOf(false) }
+    var reverbExpanded by rememberSaveable { mutableStateOf(false) }
     var outputMetrics by remember { mutableStateOf(AudioFreedomService.currentOutputMetrics) }
     val context = androidx.compose.ui.platform.LocalContext.current
     var appPreferences by remember { mutableStateOf(initialAppPreferences) }
@@ -176,18 +197,170 @@ private fun ControllerScreen(
     var profileMenuExpanded by remember { mutableStateOf(false) }
     var profileSaveRequest by remember { mutableStateOf<ProfileSaveRequest?>(null) }
     var profileName by remember { mutableStateOf("") }
-    var showingSettings by rememberSaveable { mutableStateOf(false) }
+    var currentPage by rememberSaveable { mutableStateOf(ControllerPage.Main) }
     var rootAccessState by remember { mutableStateOf(RootAccessState.NotChecked) }
     var diagnosticRefresh by remember { mutableIntStateOf(0) }
+    var assistantExpanded by rememberSaveable { mutableStateOf(false) }
+    var assistantCommand by rememberSaveable { mutableStateOf("") }
+    var assistantProposal by remember { mutableStateOf<AssistantProposal?>(null) }
+    var assistantMessage by remember { mutableStateOf<String?>(null) }
+    var assistantBusy by remember { mutableStateOf(false) }
+    var assistantUndoSettings by remember {
+        mutableStateOf(AssistantUndoStore.load(context))
+    }
+    var assistantUndoProfileId by remember { mutableStateOf<String?>(null) }
+    var assistantFeedbackCandidate by remember {
+        mutableStateOf<AssistantFeedbackCandidate?>(null)
+    }
+    var assistantVoiceState by remember { mutableStateOf(AssistantVoiceState.Idle) }
+    var voiceCaptureRequest by remember { mutableIntStateOf(0) }
+    val assistantScope = rememberCoroutineScope()
+    val voiceRecorder = remember { VoiceCommandRecorder(context.applicationContext) }
+    val voiceAudioSession = remember {
+        VoiceCommandAudioSession(context.applicationContext)
+    }
+    val microphonePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            voiceCaptureRequest++
+        } else {
+            assistantMessage = "Microphone permission is required for voice commands."
+        }
+    }
+    var languageModelInfo by remember {
+        mutableStateOf(AssistantRuntimeManager.languageModelInfo())
+    }
+    var voiceModelInfo by remember {
+        mutableStateOf(AssistantRuntimeManager.voiceModelInfo())
+    }
+    var activeModelPack by remember { mutableStateOf<AssistantModelPackType?>(null) }
+    var modelDownloadProgress by remember {
+        mutableStateOf<AssistantModelDownloadProgress?>(null)
+    }
+    var modelMessage by remember { mutableStateOf<String?>(null) }
+    var voiceTestMessage by remember { mutableStateOf<String?>(null) }
+    var widgetMessage by remember { mutableStateOf<String?>(null) }
+
+    DisposableEffect(voiceRecorder, voiceAudioSession) {
+        onDispose {
+            voiceRecorder.stop()
+            voiceAudioSession.shutdown()
+        }
+    }
+    val languageModelPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { source ->
+        if (source != null && activeModelPack == null) {
+            activeModelPack = AssistantModelPackType.Language
+            modelDownloadProgress = null
+            modelMessage = null
+            assistantScope.launch {
+                try {
+                    languageModelInfo =
+                        AssistantRuntimeManager.installImportedLanguageModel(source)
+                    modelMessage = "Custom language model installed"
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (error: Exception) {
+                    modelMessage = error.message ?: "The model could not be installed"
+                } finally {
+                    activeModelPack = null
+                }
+            }
+        }
+    }
+
+    fun installModelPack(type: AssistantModelPackType) {
+        if (activeModelPack != null) return
+        activeModelPack = type
+        modelDownloadProgress = AssistantModelDownloadProgress(
+            downloadedBytes = 0,
+            totalBytes = when (type) {
+                AssistantModelPackType.Language -> AssistantModelCatalog.language.sizeBytes
+                AssistantModelPackType.Voice -> AssistantModelCatalog.voice.sizeBytes
+            },
+        )
+        modelMessage = null
+        assistantScope.launch {
+            try {
+                val installed = AssistantRuntimeManager.installManagedPack(
+                    type = type,
+                    wifiOnly = appPreferences.assistantWifiOnlyDownloads,
+                    onProgress = { modelDownloadProgress = it },
+                )
+                when (type) {
+                    AssistantModelPackType.Language -> languageModelInfo = installed
+                    AssistantModelPackType.Voice -> {
+                        voiceModelInfo = installed
+                        if (installed.installed) {
+                            val updated = appPreferences.copy(assistantVoiceEnabled = true)
+                            appPreferences = updated
+                            onAppPreferencesChanged(updated)
+                        }
+                    }
+                }
+                modelMessage = when (type) {
+                    AssistantModelPackType.Language -> "Language model installed and verified"
+                    AssistantModelPackType.Voice ->
+                        "Voice language pack installed; push-to-talk is ready"
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                modelMessage = error.message ?: "The model pack could not be installed"
+            } finally {
+                activeModelPack = null
+                modelDownloadProgress = null
+            }
+        }
+    }
+
+    fun removeModelPack(type: AssistantModelPackType) {
+        if (activeModelPack != null) return
+        activeModelPack = type
+        modelDownloadProgress = null
+        modelMessage = null
+        assistantScope.launch {
+            try {
+                val removed = AssistantRuntimeManager.removeModel(type)
+                when (type) {
+                    AssistantModelPackType.Language -> languageModelInfo = removed
+                    AssistantModelPackType.Voice -> {
+                        voiceModelInfo = removed
+                        val updated = appPreferences.copy(assistantVoiceEnabled = false)
+                        appPreferences = updated
+                        onAppPreferencesChanged(updated)
+                    }
+                }
+                modelMessage = when (type) {
+                    AssistantModelPackType.Language -> "Language model removed"
+                    AssistantModelPackType.Voice -> "Voice language pack removed"
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                modelMessage = error.message ?: "The model pack could not be removed"
+            } finally {
+                activeModelPack = null
+            }
+        }
+    }
     val driverAvailable =
         driverState == DriverState.Attached || driverState == DriverState.Detected
 
-    fun commitSettings(updated: AudioFreedomSettings) {
+    fun commitSettings(updated: AudioFreedomSettings, keepAssistantUndo: Boolean = false) {
+        if (!keepAssistantUndo) {
+            assistantUndoSettings = null
+            assistantUndoProfileId = null
+            AssistantUndoStore.clear(context)
+        }
         settings = updated
         selectedPreset = EqualizerPreset.matching(updated)
         selectedBassPreset = BassFoundationPreset.matching(updated)
         selectedDetailPreset = DetailRecoveryPreset.matching(updated)
         selectedImmersivePreset = ImmersiveFieldPreset.matching(updated)
+        selectedReverbPreset = ReverbPreset.matching(updated)
         driverState = onSettingsChanged(updated)
     }
 
@@ -211,6 +384,13 @@ private fun ControllerScreen(
         }
     }
 
+    LaunchedEffect(appPreferences.assistantEnabled, appPreferences.assistantKeepWarm) {
+        AssistantRuntimeManager.updatePolicy(
+            appPreferences.assistantEnabled,
+            appPreferences.assistantKeepWarm,
+        )
+    }
+
     LaunchedEffect(Unit) {
         while (true) {
             val detectedRoute = AudioRouteDetector.current(context)
@@ -226,6 +406,215 @@ private fun ControllerScreen(
                 }
             }
             delay(1000L)
+        }
+    }
+
+    fun applyAssistantProposal(proposal: AssistantProposal) {
+        if (settings != proposal.baseSettings) {
+            assistantProposal = null
+            assistantMessage = "DSP settings changed. Send the command again to create a fresh proposal."
+            return
+        }
+        assistantUndoSettings = settings
+        assistantUndoProfileId = selectedProfileId
+        AssistantUndoStore.save(context, settings)
+        commitSettings(proposal.settings, keepAssistantUndo = true)
+        proposal.selectedProfileId?.let { selectedProfileId = it }
+        assistantProposal = null
+        assistantFeedbackCandidate = assistantCommand.trim()
+            .takeIf { appPreferences.assistantAskForFeedback && it.isNotEmpty() }
+            ?.let { AssistantFeedbackCandidate(it, proposal.changes) }
+        assistantCommand = ""
+        assistantMessage = "Applied. The previous settings are available with Undo."
+    }
+
+    fun submitAssistantCommand(
+        command: String = assistantCommand,
+        speakBeforeAutomaticApply: Boolean = false,
+        allowSafeAutomaticApply: Boolean = false,
+        onComplete: () -> Unit = {},
+    ) {
+        if (assistantBusy || command.isBlank()) {
+            onComplete()
+            return
+        }
+        assistantBusy = true
+        assistantFeedbackCandidate = null
+        assistantScope.launch {
+            try {
+                val result = AssistantRuntimeManager.plan(
+                    AssistantRequest(
+                        command = command,
+                        current = settings,
+                        profiles = profiles,
+                        maximumBandDeltaMillibels =
+                            appPreferences.assistantAdjustmentStrength.maximumBandDeltaMillibels,
+                        usePersonalization = appPreferences.assistantAskForFeedback,
+                    ),
+                )
+                when (result) {
+                    is AssistantPlanResult.Proposed -> {
+                        val proposal = result.proposal
+                        val shouldApplyAutomatically =
+                            (
+                                allowSafeAutomaticApply ||
+                                    appPreferences.assistantApplyMode ==
+                                    AssistantApplyMode.SafeAutomatic
+                            ) &&
+                            proposal.canApplyAutomatically
+                        val spokenResult = if (speakBeforeAutomaticApply) {
+                            voiceAudioSession.speakPlannedChange(
+                                change = proposal.title,
+                                applying = shouldApplyAutomatically,
+                            )
+                        } else {
+                            null
+                        }
+                        if (shouldApplyAutomatically) {
+                            applyAssistantProposal(proposal)
+                            assistantMessage = when (spokenResult) {
+                                SpokenConfirmationResult.NoOfflineVoice ->
+                                    "Applied. Install an offline system speech voice to hear confirmations."
+                                SpokenConfirmationResult.Failed ->
+                                    "Applied, but Android could not play the spoken confirmation."
+                                else -> assistantMessage
+                            }
+                        } else {
+                            assistantProposal = proposal
+                            assistantMessage = when (spokenResult) {
+                                SpokenConfirmationResult.NoOfflineVoice ->
+                                    "Install an offline system speech voice to hear confirmations."
+                                SpokenConfirmationResult.Failed ->
+                                    "Android could not play the spoken confirmation."
+                                else -> null
+                            }
+                        }
+                    }
+                    AssistantPlanResult.Undo -> {
+                        val previous = assistantUndoSettings ?: AssistantUndoStore.load(context)
+                        if (previous == null) {
+                            assistantProposal = null
+                            assistantMessage = "There is no assistant change to undo."
+                        } else {
+                            val spokenResult = if (speakBeforeAutomaticApply) {
+                                voiceAudioSession.speakPlannedChange(
+                                    change = "Restore previous settings",
+                                    applying = true,
+                                )
+                            } else {
+                                null
+                            }
+                            commitSettings(previous, keepAssistantUndo = true)
+                            selectedProfileId = assistantUndoProfileId
+                            assistantUndoSettings = null
+                            assistantUndoProfileId = null
+                            AssistantUndoStore.clear(context)
+                            assistantProposal = null
+                            assistantCommand = ""
+                            assistantMessage = when (spokenResult) {
+                                SpokenConfirmationResult.NoOfflineVoice ->
+                                    "Settings restored. Install an offline system speech voice to hear confirmations."
+                                SpokenConfirmationResult.Failed ->
+                                    "Settings restored, but Android could not play the spoken confirmation."
+                                else -> "Previous settings restored."
+                            }
+                        }
+                    }
+                    is AssistantPlanResult.NotUnderstood -> {
+                        assistantProposal = null
+                        assistantMessage = result.message
+                    }
+                }
+            } catch (_: Exception) {
+                assistantProposal = null
+                assistantMessage = "The local assistant could not process that command."
+            } finally {
+                assistantBusy = false
+                onComplete()
+            }
+        }
+    }
+
+    LaunchedEffect(voiceCaptureRequest) {
+        if (voiceCaptureRequest == 0) return@LaunchedEffect
+        assistantProposal = null
+        assistantFeedbackCandidate = null
+        assistantMessage = null
+        assistantVoiceState = AssistantVoiceState.Listening
+        var commandWillReleaseAudioFocus = false
+        if (appPreferences.assistantPauseMediaForVoice) {
+            voiceAudioSession.requestPlaybackPause()
+        }
+        try {
+            when (val recording = withContext(Dispatchers.IO) { voiceRecorder.record() }) {
+                VoiceRecordingResult.CallActive -> {
+                    assistantMessage = "Voice input stopped because a call is active."
+                }
+                VoiceRecordingResult.TooShort -> {
+                    assistantMessage = "The recording was too short. Tap the microphone and speak again."
+                }
+                is VoiceRecordingResult.Audio -> {
+                    assistantVoiceState = AssistantVoiceState.Transcribing
+                    val automaticTranscript = AssistantVoiceRuntimeManager.transcribe(
+                        recording.samples,
+                        appPreferences.assistantLanguage,
+                    )
+                    val transcript = if (
+                        appPreferences.assistantLanguage == AssistantLanguage.Automatic &&
+                        !isSupportedAssistantCommand(
+                            automaticTranscript,
+                            settings,
+                            profiles,
+                            appPreferences,
+                        )
+                    ) {
+                        val bulgarianTranscript = AssistantVoiceRuntimeManager.transcribe(
+                            recording.samples,
+                            AssistantLanguage.Bulgarian,
+                        )
+                        chooseAutomaticVoiceTranscript(
+                            primary = automaticTranscript,
+                            bulgarian = bulgarianTranscript,
+                        ) { candidate ->
+                            isSupportedAssistantCommand(
+                                candidate,
+                                settings,
+                                profiles,
+                                appPreferences,
+                            )
+                        }
+                    } else {
+                        automaticTranscript
+                    }
+                    if (transcript.isBlank()) {
+                        assistantMessage = "No speech was recognized."
+                    } else {
+                        assistantCommand = transcript
+                        assistantMessage = "Recognized: $transcript"
+                        if (
+                            appPreferences.assistantAutoSubmitVoice ||
+                            appPreferences.assistantSpeakVoiceConfirmation
+                        ) {
+                            commandWillReleaseAudioFocus = true
+                            submitAssistantCommand(
+                                command = transcript,
+                                speakBeforeAutomaticApply =
+                                    appPreferences.assistantSpeakVoiceConfirmation,
+                                allowSafeAutomaticApply =
+                                    appPreferences.assistantAutoSubmitVoice,
+                                onComplete = voiceAudioSession::restorePlayback,
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (error: Exception) {
+            assistantMessage = error.message ?: "Voice input could not be processed."
+        } finally {
+            assistantVoiceState = AssistantVoiceState.Idle
+            if (!commandWillReleaseAudioFocus) {
+                voiceAudioSession.restorePlayback()
+            }
         }
     }
 
@@ -259,26 +648,38 @@ private fun ControllerScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    if (showingSettings) {
-                        Text("Settings", fontWeight = FontWeight.SemiBold)
-                    } else {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("AudioFreedom", fontWeight = FontWeight.SemiBold)
-                            Spacer(Modifier.width(14.dp))
-                            AudioRouteIcon(audioRoute, contentDescription = audioRoute.label)
+                    when (currentPage) {
+                        ControllerPage.Settings ->
+                            Text("Settings", fontWeight = FontWeight.SemiBold)
+                        ControllerPage.AssistantSettings ->
+                            Text("Local assistant", fontWeight = FontWeight.SemiBold)
+                        ControllerPage.Main -> {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("AudioFreedom", fontWeight = FontWeight.SemiBold)
+                                Spacer(Modifier.width(14.dp))
+                                AudioRouteIcon(audioRoute, contentDescription = audioRoute.label)
+                            }
                         }
                     }
                 },
                 navigationIcon = {
-                    if (showingSettings) {
-                        IconButton(onClick = { showingSettings = false }) {
+                    if (currentPage != ControllerPage.Main) {
+                        IconButton(
+                            onClick = {
+                                currentPage = if (currentPage == ControllerPage.AssistantSettings) {
+                                    ControllerPage.Settings
+                                } else {
+                                    ControllerPage.Main
+                                }
+                            },
+                        ) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                         }
                     }
                 },
                 actions = {
-                    if (!showingSettings) {
-                        IconButton(onClick = { showingSettings = true }) {
+                    if (currentPage == ControllerPage.Main) {
+                        IconButton(onClick = { currentPage = ControllerPage.Settings }) {
                             Icon(Icons.Rounded.Settings, contentDescription = "Settings")
                         }
                         IconButton(onClick = {
@@ -298,8 +699,8 @@ private fun ControllerScreen(
         },
         containerColor = MaterialTheme.colorScheme.background,
     ) { contentPadding ->
-        if (showingSettings) {
-            SettingsScreen(
+        when (currentPage) {
+            ControllerPage.Settings -> SettingsScreen(
                 route = audioRoute,
                 profiles = profiles,
                 preferences = appPreferences,
@@ -328,10 +729,66 @@ private fun ControllerScreen(
                     }
                     AudioFreedomService.refreshStatus(context)
                 },
+                onOpenAssistantSettings = {
+                    currentPage = ControllerPage.AssistantSettings
+                },
                 modifier = Modifier.padding(contentPadding),
             )
-        } else {
-            Column(
+            ControllerPage.AssistantSettings -> AssistantSettingsScreen(
+                preferences = appPreferences,
+                languageModelInfo = languageModelInfo,
+                voiceModelInfo = voiceModelInfo,
+                activeModelPack = activeModelPack,
+                modelDownloadProgress = modelDownloadProgress,
+                modelMessage = modelMessage,
+                voiceTestMessage = voiceTestMessage,
+                widgetMessage = widgetMessage,
+                onPreferencesChanged = { updated ->
+                    appPreferences = updated
+                    onAppPreferencesChanged(updated)
+                },
+                onAddVoiceWidget = {
+                    widgetMessage = requestAssistantVoiceWidget(context)
+                },
+                onInstallLanguageModel = {
+                    installModelPack(AssistantModelPackType.Language)
+                },
+                onImportLanguageModel = {
+                    languageModelPicker.launch(arrayOf("application/octet-stream", "*/*"))
+                },
+                onRemoveLanguageModel = {
+                    removeModelPack(AssistantModelPackType.Language)
+                },
+                onInstallVoiceModel = {
+                    installModelPack(AssistantModelPackType.Voice)
+                },
+                onRemoveVoiceModel = {
+                    removeModelPack(AssistantModelPackType.Voice)
+                },
+                onTestVoice = {
+                    voiceTestMessage = null
+                    if (appPreferences.assistantPauseMediaForVoice) {
+                        voiceAudioSession.requestPlaybackPause()
+                    }
+                    assistantScope.launch {
+                        val result = voiceAudioSession.speakPlannedChange(
+                            change = "Voice confirmation is ready",
+                            applying = false,
+                        )
+                        voiceTestMessage = when (result) {
+                            SpokenConfirmationResult.Spoken ->
+                                "Offline voice confirmation is working"
+                            SpokenConfirmationResult.NoOfflineVoice ->
+                                "No offline English system voice is installed"
+                            SpokenConfirmationResult.Failed ->
+                                "Android could not play the offline system voice"
+                        }
+                        voiceAudioSession.restorePlayback()
+                    }
+                },
+                modifier = Modifier.padding(contentPadding),
+            )
+            ControllerPage.Main -> Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(contentPadding)
@@ -406,6 +863,68 @@ private fun ControllerScreen(
                 },
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            if (appPreferences.assistantEnabled) {
+                AssistantPanel(
+                    expanded = assistantExpanded,
+                    command = assistantCommand,
+                    proposal = assistantProposal,
+                    message = assistantMessage,
+                    busy = assistantBusy,
+                    canUndo = assistantUndoSettings != null || AssistantUndoStore.load(context) != null,
+                    voiceEnabled = appPreferences.assistantVoiceEnabled && voiceModelInfo.installed,
+                    voiceState = assistantVoiceState,
+                    feedbackCommand = assistantFeedbackCandidate?.command,
+                    onExpandedChange = { assistantExpanded = it },
+                    onCommandChange = {
+                        assistantCommand = it
+                        assistantMessage = null
+                    },
+                    onSubmit = { submitAssistantCommand() },
+                    onVoice = {
+                        if (assistantVoiceState == AssistantVoiceState.Listening) {
+                            voiceRecorder.stop()
+                        } else if (
+                            context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+                            PackageManager.PERMISSION_GRANTED
+                        ) {
+                            voiceCaptureRequest++
+                        } else {
+                            microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                    },
+                    onApply = {
+                        assistantProposal?.let(::applyAssistantProposal)
+                    },
+                    onDiscard = {
+                        assistantProposal = null
+                        assistantMessage = "Proposed changes discarded."
+                    },
+                    onUndo = {
+                        val previous = assistantUndoSettings ?: AssistantUndoStore.load(context)
+                        if (previous != null) {
+                            commitSettings(previous, keepAssistantUndo = true)
+                            selectedProfileId = assistantUndoProfileId
+                            assistantUndoSettings = null
+                            assistantUndoProfileId = null
+                            AssistantUndoStore.clear(context)
+                            assistantProposal = null
+                            assistantFeedbackCandidate = null
+                            assistantMessage = "Previous settings restored."
+                        }
+                    },
+                    onFeedback = { accepted ->
+                        assistantFeedbackCandidate?.let { candidate ->
+                            AssistantFeedbackStore.record(context, candidate, accepted)
+                        }
+                        assistantFeedbackCandidate = null
+                        assistantMessage = if (accepted) {
+                            "Saved locally. This result will guide future assistant decisions on this phone."
+                        } else {
+                            "Saved locally. The assistant will avoid repeating this interpretation; Undo is still available."
+                        }
+                    },
+                )
+            }
             CollapsibleEffectSection(
                 title = "Equalizer",
                 summary = selectedPreset?.label ?: "Custom",
@@ -560,6 +1079,99 @@ private fun ControllerScreen(
                         selectedImmersivePreset = ImmersiveFieldPreset.matching(settings)
                     },
                     onValueChangeFinished = { commitSettings(settings) },
+                )
+                Spacer(Modifier.height(14.dp))
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            CollapsibleEffectSection(
+                title = "Reverb",
+                summary = if (settings.reverbEnabled) {
+                    selectedReverbPreset?.label ?: "Custom"
+                } else {
+                    "Off"
+                },
+                expanded = reverbExpanded,
+                onExpandedChange = { reverbExpanded = it },
+                enabled = settings.reverbEnabled,
+                onEnabledChange = { requested ->
+                    commitSettings(settings.copy(reverbEnabled = requested))
+                },
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    androidx.compose.foundation.layout.Box {
+                        TextButton(onClick = { reverbPresetMenuExpanded = true }) {
+                            Text("Preset")
+                            Icon(Icons.Rounded.ExpandMore, contentDescription = null)
+                        }
+                        DropdownMenu(
+                            expanded = reverbPresetMenuExpanded,
+                            onDismissRequest = { reverbPresetMenuExpanded = false },
+                        ) {
+                            ReverbPreset.entries.forEach { preset ->
+                                DropdownMenuItem(
+                                    text = { Text(preset.label) },
+                                    onClick = {
+                                        reverbPresetMenuExpanded = false
+                                        commitSettings(preset.applyTo(settings))
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                PercentageSlider(
+                    label = "Amount",
+                    value = settings.reverbAmountPercent,
+                    enabled = settings.reverbEnabled,
+                    onValueChange = { value ->
+                        settings = settings.copy(reverbAmountPercent = value)
+                        selectedReverbPreset = ReverbPreset.matching(settings)
+                    },
+                    onValueChangeFinished = { commitSettings(settings) },
+                )
+                PercentageSlider(
+                    label = "Space",
+                    value = settings.reverbSpacePercent,
+                    enabled = settings.reverbEnabled,
+                    onValueChange = { value ->
+                        settings = settings.copy(reverbSpacePercent = value)
+                        selectedReverbPreset = ReverbPreset.matching(settings)
+                    },
+                    onValueChangeFinished = { commitSettings(settings) },
+                )
+                PercentageSlider(
+                    label = "Damping",
+                    value = settings.reverbDampingPercent,
+                    enabled = settings.reverbEnabled,
+                    onValueChange = { value ->
+                        settings = settings.copy(reverbDampingPercent = value)
+                        selectedReverbPreset = ReverbPreset.matching(settings)
+                    },
+                    onValueChangeFinished = { commitSettings(settings) },
+                )
+                SettingSlider(
+                    label = "Decay",
+                    valueLabel = String.format(
+                        Locale.US,
+                        "%.1f s",
+                        settings.reverbDecayMilliseconds / 1000F,
+                    ),
+                    value = settings.reverbDecayMilliseconds.toFloat(),
+                    onValueChange = { value ->
+                        settings = settings.copy(
+                            reverbDecayMilliseconds =
+                                ((value / 100F).roundToInt() * 100).coerceIn(300, 5000),
+                        )
+                        selectedReverbPreset = ReverbPreset.matching(settings)
+                    },
+                    onValueChangeFinished = { commitSettings(settings) },
+                    valueRange = 300F..5000F,
+                    steps = 46,
+                    enabled = settings.reverbEnabled,
                 )
                 Spacer(Modifier.height(14.dp))
             }
@@ -795,7 +1407,7 @@ private fun ControllerScreen(
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(Modifier.height(24.dp))
-        }
+            }
         }
     }
 }
@@ -1146,7 +1758,7 @@ private fun DriverStatusRow(state: DriverState, rootAccessState: RootAccessState
 }
 
 @Composable
-private fun AudioFreedomTheme(
+internal fun AudioFreedomTheme(
     themePreference: ThemePreference,
     content: @Composable () -> Unit,
 ) {

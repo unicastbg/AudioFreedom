@@ -27,7 +27,7 @@ done
         done <"$PLAN"
         if [ "$available" = "1" ]; then
             echo "effect=available"
-            echo "dsp=preamp,10-band-eq,bass-foundation,detail-recovery,immersive-field,linked-limiter"
+            echo "dsp=preamp,10-band-eq,bass-foundation,detail-recovery,immersive-field,reverb,linked-limiter"
         else
             echo "effect=unavailable"
         fi

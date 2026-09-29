@@ -219,6 +219,20 @@ constexpr WireMessage make_immersive_field_configuration(
     return message;
 }
 
+constexpr WireMessage make_reverb_configuration(
+        const ReverbConfiguration& configuration) noexcept {
+    WireMessage message{
+            .parameter_id = ParameterId::kReverbConfiguration,
+            .payload_size = 20,
+    };
+    message.payload[0] = configuration.enabled ? 1 : 0;
+    detail::put_u32(message.payload, 4, configuration.amount_percent);
+    detail::put_u32(message.payload, 8, configuration.space_percent);
+    detail::put_u32(message.payload, 12, configuration.damping_percent);
+    detail::put_u32(message.payload, 16, configuration.decay_milliseconds);
+    return message;
+}
+
 constexpr WireMessage make_output_metrics(const OutputMetrics& metrics) noexcept {
     WireMessage message{.parameter_id = ParameterId::kOutputMetrics, .payload_size = 12};
     detail::put_u32(message.payload, 0,
@@ -357,6 +371,21 @@ constexpr std::optional<ImmersiveFieldConfiguration> read_immersive_field_config
             .width_percent = detail::get_u32(message.payload, 8),
             .center_percent = detail::get_u32(message.payload, 12),
             .room_percent = detail::get_u32(message.payload, 16),
+    };
+}
+
+constexpr std::optional<ReverbConfiguration> read_reverb_configuration(
+        const WireMessage& message) noexcept {
+    if (message.parameter_id != ParameterId::kReverbConfiguration ||
+        message.payload_size != 20 || message.payload[0] > 1) {
+        return std::nullopt;
+    }
+    return ReverbConfiguration{
+            .enabled = message.payload[0] == 1,
+            .amount_percent = detail::get_u32(message.payload, 4),
+            .space_percent = detail::get_u32(message.payload, 8),
+            .damping_percent = detail::get_u32(message.payload, 12),
+            .decay_milliseconds = detail::get_u32(message.payload, 16),
     };
 }
 

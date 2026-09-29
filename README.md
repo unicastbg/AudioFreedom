@@ -33,12 +33,16 @@ software effect chain.
 - Bass Foundation with deep-band lift, adaptive restraint, and small-driver support
 - Transient-aware Detail Recovery with linked stereo decisions
 - Immersive Field with width, center, room, crossfeed, and early-reflection processing
+- Stereo reverb with amount, space, damping, decay, and room presets
 - Linked-channel output limiter with configurable ceiling and release
 - Live input, output, and gain-reduction meters
 - Named profiles with optional automatic assignment by connected output
 - Phone speaker, wired, USB, HDMI, and Bluetooth route awareness in the app and notification
 - System, light, and dark themes
 - On-demand update checks against the latest public GitHub release
+- Optional on-device assistant with typed commands, offline Whisper push-to-talk,
+  bounded DSP changes, private feedback, spoken confirmation, and persistent undo
+- Home-screen voice widget with a compact level-reactive command panel
 - Automatic bypass outside Android's normal audio mode
 
 ## Compatibility
@@ -63,6 +67,8 @@ Xiaomi, Qualcomm, Dolby, or other manufacturer DSP algorithms.
 
 See [Reference devices](docs/REFERENCE_DEVICES.md) and
 [Architecture](docs/ARCHITECTURE.md) for integration details and current boundaries.
+The supported typed and spoken phrases are listed in the
+[Voice command guide](docs/VOICE_COMMANDS.md).
 
 ## Repository layout
 
@@ -72,6 +78,8 @@ See [Reference devices](docs/REFERENCE_DEVICES.md) and
 - `platform/legacy/`: classic Android effect-library backend
 - `platform/controller/`: Android-versioned output-mix controller
 - `app/`: companion Android controller
+- `assistant-runtime/`: pinned llama.cpp bridge for optional local command interpretation
+- `voice-runtime/`: pinned whisper.cpp bridge for optional offline speech recognition
 - `module/package-universal/`: universal root-module template
 - `tests/`: native DSP and protocol tests
 - `tools/`: build, packaging, diagnostics, and device-test scripts

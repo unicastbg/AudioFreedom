@@ -1,5 +1,6 @@
 package com.svetlio.audiofreedom
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.BluetoothAudio
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.DevicesOther
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Headphones
@@ -21,6 +23,7 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.rounded.Usb
 import androidx.compose.material3.CircularProgressIndicator
@@ -68,6 +71,7 @@ internal fun SettingsScreen(
     assignedProfileId: String?,
     onPreferencesChanged: (AppPreferences) -> Unit,
     onProfileAssigned: (String?) -> Unit,
+    onOpenAssistantSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var profileMenuExpanded by remember { mutableStateOf(false) }
@@ -165,6 +169,27 @@ internal fun SettingsScreen(
                     }
                 }
             }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+        SettingsSectionTitle("Assistant")
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onOpenAssistantSettings)
+                .padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Rounded.SmartToy, contentDescription = null)
+            Column(modifier = Modifier.padding(start = 16.dp).weight(1F)) {
+                Text("Local assistant", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    if (preferences.assistantEnabled) "Enabled" else "Disabled",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            Icon(Icons.Rounded.ChevronRight, contentDescription = null)
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 

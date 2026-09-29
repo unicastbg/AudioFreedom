@@ -128,6 +128,13 @@ private class SessionZeroEffectController {
             if (!immersiveFieldConfigured) {
                 return false
             }
+            val reverbConfigured = sendParameter(
+                currentEffect,
+                AudioFreedomProtocol.reverbConfiguration(settings),
+            )
+            if (!reverbConfigured) {
+                return false
+            }
             return sendParameter(
                 currentEffect,
                 AudioFreedomProtocol.limiterConfiguration(settings),

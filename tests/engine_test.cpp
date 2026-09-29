@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <vector>
 
 namespace {
 
@@ -615,6 +616,82 @@ void test_immersive_field_reflections_stereo_and_clamping() {
     }
 }
 
+void test_reverb_produces_a_decaying_stereo_tail() {
+    audiofreedom::Engine engine;
+    expect(engine.prepare({48000, 2}), "reverb stream must prepare");
+    engine.set_preamp_millibels(0);
+    engine.set_limiter_enabled(false);
+    engine.set_reverb_enabled(true);
+    engine.set_reverb_amount_percent(100);
+    engine.set_reverb_space_percent(70);
+    engine.set_reverb_damping_percent(45);
+    engine.set_reverb_decay_milliseconds(2200);
+    engine.set_enabled(true);
+
+    constexpr std::size_t frame_count = 48000;
+    std::vector<float> samples(frame_count * 2, 0.0F);
+    samples[0] = 0.8F;
+    expect(engine.process(samples.data(), frame_count), "reverb impulse must process");
+
+    double early_energy = 0.0;
+    double late_energy = 0.0;
+    bool stereo_tail = false;
+    for (std::size_t frame = 2000; frame < 12000; ++frame) {
+        const float left = samples[frame * 2];
+        const float right = samples[frame * 2 + 1];
+        early_energy += static_cast<double>(left) * left +
+                        static_cast<double>(right) * right;
+        stereo_tail = stereo_tail || std::abs(left - right) > 0.000001F;
+    }
+    for (std::size_t frame = 30000; frame < frame_count; ++frame) {
+        const float left = samples[frame * 2];
+        const float right = samples[frame * 2 + 1];
+        late_energy += static_cast<double>(left) * left +
+                       static_cast<double>(right) * right;
+    }
+    expect(early_energy > 0.0001, "reverb produced no audible early tail");
+    expect(late_energy > 0.0000001, "reverb tail ended too early");
+    expect(late_energy < early_energy, "reverb tail did not decay");
+    expect(stereo_tail, "reverb did not decorrelate its stereo output");
+}
+
+void test_reverb_bypass_clamping_and_multichannel_safety() {
+    audiofreedom::Engine engine;
+    engine.set_reverb_amount_percent(500);
+    engine.set_reverb_space_percent(500);
+    engine.set_reverb_damping_percent(500);
+    engine.set_reverb_decay_milliseconds(99999);
+    expect(engine.reverb_amount_percent() == 100, "reverb amount must clamp high");
+    expect(engine.reverb_space_percent() == 100, "reverb space must clamp high");
+    expect(engine.reverb_damping_percent() == 100, "reverb damping must clamp high");
+    expect(engine.reverb_decay_milliseconds() == 5000, "reverb decay must clamp high");
+
+    expect(engine.prepare({48000, 2}), "reverb bypass stream must prepare");
+    engine.set_preamp_millibels(0);
+    engine.set_limiter_enabled(false);
+    engine.set_reverb_enabled(true);
+    engine.set_reverb_amount_percent(0);
+    engine.set_enabled(true);
+    float stereo[] = {0.4F, -0.2F, -0.3F, 0.1F};
+    expect(engine.process(stereo, 2), "zero-amount reverb signal must process");
+    expect_near(stereo[0], 0.4F, 0.0F, "zero reverb amount changed left sample");
+    expect_near(stereo[1], -0.2F, 0.0F, "zero reverb amount changed right sample");
+
+    audiofreedom::Engine multichannel;
+    expect(multichannel.prepare({48000, 6}), "reverb multichannel stream must prepare");
+    multichannel.set_preamp_millibels(0);
+    multichannel.set_limiter_enabled(false);
+    multichannel.set_reverb_enabled(true);
+    multichannel.set_reverb_amount_percent(100);
+    multichannel.set_enabled(true);
+    float channels[] = {0.1F, 0.2F, 0.3F, 0.4F, 0.5F, 0.6F};
+    expect(multichannel.process(channels, 1), "reverb multichannel bypass must process");
+    for (std::size_t index = 0; index < 6; ++index) {
+        expect_near(channels[index], 0.1F * static_cast<float>(index + 1), 0.000001F,
+                    "reverb changed unsupported multichannel audio");
+    }
+}
+
 void test_protocol_identity() {
     audiofreedom::protocol::DriverStatus status;
     expect(status.magic == audiofreedom::protocol::kMagic, "status magic mismatch");
@@ -756,6 +833,26 @@ void test_wire_immersive_field_round_trip() {
            "immersive field configuration changed on the wire");
 }
 
+void test_wire_reverb_round_trip() {
+    using namespace audiofreedom::protocol;
+    ReverbConfiguration input{
+            .enabled = true,
+            .amount_percent = 38,
+            .space_percent = 75,
+            .damping_percent = 42,
+            .decay_milliseconds = 2600,
+    };
+    const auto bytes = encode_message(make_reverb_configuration(input));
+    expect(bytes.has_value(), "reverb configuration must encode");
+    const auto message = decode_message(*bytes);
+    expect(message.has_value(), "reverb configuration must decode");
+    const auto output = read_reverb_configuration(*message);
+    expect(output.has_value() && output->enabled && output->amount_percent == 38 &&
+                   output->space_percent == 75 && output->damping_percent == 42 &&
+                   output->decay_milliseconds == 2600,
+           "reverb configuration changed on the wire");
+}
+
 void test_wire_protocol_version_round_trip() {
     using namespace audiofreedom::protocol;
 
@@ -863,6 +960,8 @@ int main() {
     test_detail_recovery_bypass_stereo_and_clamping();
     test_immersive_field_shapes_stage_without_latency();
     test_immersive_field_reflections_stereo_and_clamping();
+    test_reverb_produces_a_decaying_stereo_tail();
+    test_reverb_bypass_clamping_and_multichannel_safety();
     test_protocol_identity();
     test_wire_parameter_round_trip();
     test_wire_equalizer_round_trip();
@@ -870,6 +969,7 @@ int main() {
     test_wire_dynamic_bass_round_trip();
     test_wire_detail_recovery_round_trip();
     test_wire_immersive_field_round_trip();
+    test_wire_reverb_round_trip();
     test_wire_protocol_version_round_trip();
     test_wire_is_explicit_little_endian();
     test_wire_status_round_trip();

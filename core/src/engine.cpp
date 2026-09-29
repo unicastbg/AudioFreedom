@@ -62,6 +62,12 @@ void Engine::reset() noexcept {
     immersive_delay_right_.fill(0.0F);
     immersive_delay_index_ = 0;
     immersive_state_active_ = false;
+    for (auto& delay_line : reverb_delay_lines_) {
+        delay_line.fill(0.0F);
+    }
+    reverb_damping_states_.fill(0.0F);
+    reverb_delay_index_ = 0;
+    reverb_state_active_ = false;
     input_peak_millibels_.store(kSilenceMillibels, std::memory_order_relaxed);
     output_peak_millibels_.store(kSilenceMillibels, std::memory_order_relaxed);
     gain_reduction_millibels_.store(0, std::memory_order_relaxed);
@@ -277,6 +283,55 @@ std::uint32_t Engine::immersive_room_percent() const noexcept {
     return immersive_room_percent_.load(std::memory_order_acquire);
 }
 
+void Engine::set_reverb_enabled(const bool enabled) noexcept {
+    reverb_enabled_.store(enabled, std::memory_order_release);
+}
+
+bool Engine::reverb_enabled() const noexcept {
+    return reverb_enabled_.load(std::memory_order_acquire);
+}
+
+void Engine::set_reverb_amount_percent(const std::uint32_t percent) noexcept {
+    reverb_amount_percent_.store(
+            std::clamp(percent, kMinReverbPercent, kMaxReverbPercent),
+            std::memory_order_release);
+}
+
+std::uint32_t Engine::reverb_amount_percent() const noexcept {
+    return reverb_amount_percent_.load(std::memory_order_acquire);
+}
+
+void Engine::set_reverb_space_percent(const std::uint32_t percent) noexcept {
+    reverb_space_percent_.store(
+            std::clamp(percent, kMinReverbPercent, kMaxReverbPercent),
+            std::memory_order_release);
+}
+
+std::uint32_t Engine::reverb_space_percent() const noexcept {
+    return reverb_space_percent_.load(std::memory_order_acquire);
+}
+
+void Engine::set_reverb_damping_percent(const std::uint32_t percent) noexcept {
+    reverb_damping_percent_.store(
+            std::clamp(percent, kMinReverbPercent, kMaxReverbPercent),
+            std::memory_order_release);
+}
+
+std::uint32_t Engine::reverb_damping_percent() const noexcept {
+    return reverb_damping_percent_.load(std::memory_order_acquire);
+}
+
+void Engine::set_reverb_decay_milliseconds(const std::uint32_t milliseconds) noexcept {
+    reverb_decay_milliseconds_.store(
+            std::clamp(milliseconds, kMinReverbDecayMilliseconds,
+                       kMaxReverbDecayMilliseconds),
+            std::memory_order_release);
+}
+
+std::uint32_t Engine::reverb_decay_milliseconds() const noexcept {
+    return reverb_decay_milliseconds_.load(std::memory_order_acquire);
+}
+
 void Engine::clear_equalizer_state() noexcept {
     for (auto& band_states : eq_states_) {
         for (auto& state : band_states) {
@@ -342,6 +397,8 @@ bool Engine::process(float* const samples, const std::size_t frame_count) noexce
         const bool use_detail_recovery = detail_recovery_enabled();
         const bool use_immersive_field =
                 immersive_field_enabled() && config_.channel_count == 2;
+        const bool use_reverb = reverb_enabled() &&
+                (config_.channel_count == 1 || config_.channel_count == 2);
         const float sample_rate = static_cast<float>(config_.sample_rate_hz);
         const float bass_strength =
                 static_cast<float>(bass_boost_millibels()) /
@@ -415,6 +472,36 @@ bool Engine::process(float* const samples, const std::size_t frame_count) noexce
         const std::size_t reflection_delay_right = delaySamples(0.011F);
         const std::size_t reflection_delay_left_late = delaySamples(0.017F);
         const std::size_t reflection_delay_right_late = delaySamples(0.023F);
+        const float reverb_amount =
+                static_cast<float>(reverb_amount_percent()) / 100.0F;
+        const float reverb_space =
+                static_cast<float>(reverb_space_percent()) / 100.0F;
+        const float reverb_damping =
+                static_cast<float>(reverb_damping_percent()) / 100.0F;
+        const float reverb_decay_seconds =
+                static_cast<float>(reverb_decay_milliseconds()) / 1000.0F;
+        const float reverb_size_scale = 0.65F + 0.85F * reverb_space;
+        constexpr std::array<float, kReverbDelayLineCount> kReverbDelaySeconds = {
+                0.0297F, 0.0371F, 0.0411F, 0.0437F,
+        };
+        std::array<std::size_t, kReverbDelayLineCount> reverb_delay_samples{};
+        float reverb_average_delay_seconds = 0.0F;
+        for (std::size_t line = 0; line < kReverbDelayLineCount; ++line) {
+            const float delay_seconds = kReverbDelaySeconds[line] * reverb_size_scale;
+            reverb_average_delay_seconds += delay_seconds;
+            reverb_delay_samples[line] = std::clamp(
+                    static_cast<std::size_t>(std::lround(delay_seconds * sample_rate)),
+                    std::size_t{1}, kReverbDelayCapacity - 1);
+        }
+        reverb_average_delay_seconds /= static_cast<float>(kReverbDelayLineCount);
+        const float reverb_feedback = std::clamp(
+                std::pow(10.0F, -3.0F * reverb_average_delay_seconds /
+                                     reverb_decay_seconds),
+                0.20F, 0.965F);
+        const float reverb_damping_cutoff = 12000.0F - 10000.0F * reverb_damping;
+        const float reverb_damping_filter = onePoleCoefficient(reverb_damping_cutoff);
+        const float reverb_wet_gain = 0.55F * reverb_amount;
+        const float reverb_dry_gain = 1.0F - 0.12F * reverb_amount;
         std::array<float, kMaxChannelCount> detail_highpass{};
 
         if (!use_dynamic_bass) {
@@ -440,6 +527,14 @@ bool Engine::process(float* const samples, const std::size_t frame_count) noexce
             immersive_delay_index_ = 0;
         }
         immersive_state_active_ = use_immersive_field;
+        if (!use_reverb && reverb_state_active_) {
+            for (auto& delay_line : reverb_delay_lines_) {
+                delay_line.fill(0.0F);
+            }
+            reverb_damping_states_.fill(0.0F);
+            reverb_delay_index_ = 0;
+        }
+        reverb_state_active_ = use_reverb;
         const float limiter_threshold = std::pow(
                 10.0F, static_cast<float>(limiter_threshold_millibels()) / 2000.0F);
         const float release_seconds =
@@ -623,6 +718,66 @@ bool Engine::process(float* const samples, const std::size_t frame_count) noexce
                         dry_right + immersive_amount * (wet_right - dry_right);
                 immersive_delay_index_ =
                         (immersive_delay_index_ + 1) % kImmersiveDelayCapacity;
+            }
+
+            if (use_reverb) {
+                const std::size_t left_index = frame * config_.channel_count;
+                const std::size_t right_index = config_.channel_count == 2
+                        ? left_index + 1
+                        : left_index;
+                const float dry_left = samples[left_index];
+                const float dry_right = samples[right_index];
+                const float mono = 0.5F * (dry_left + dry_right);
+                const float side = 0.5F * (dry_left - dry_right);
+
+                std::array<float, kReverbDelayLineCount> delayed{};
+                for (std::size_t line = 0; line < kReverbDelayLineCount; ++line) {
+                    const std::size_t read_index =
+                            (reverb_delay_index_ + kReverbDelayCapacity -
+                             reverb_delay_samples[line]) % kReverbDelayCapacity;
+                    delayed[line] = reverb_delay_lines_[line][read_index];
+                    reverb_damping_states_[line] += reverb_damping_filter *
+                            (delayed[line] - reverb_damping_states_[line]);
+                }
+
+                const float h0 = 0.5F * (reverb_damping_states_[0] +
+                                         reverb_damping_states_[1] +
+                                         reverb_damping_states_[2] +
+                                         reverb_damping_states_[3]);
+                const float h1 = 0.5F * (reverb_damping_states_[0] -
+                                         reverb_damping_states_[1] +
+                                         reverb_damping_states_[2] -
+                                         reverb_damping_states_[3]);
+                const float h2 = 0.5F * (reverb_damping_states_[0] +
+                                         reverb_damping_states_[1] -
+                                         reverb_damping_states_[2] -
+                                         reverb_damping_states_[3]);
+                const float h3 = 0.5F * (reverb_damping_states_[0] -
+                                         reverb_damping_states_[1] -
+                                         reverb_damping_states_[2] +
+                                         reverb_damping_states_[3]);
+                constexpr float kReverbInputGain = 0.28F;
+                reverb_delay_lines_[0][reverb_delay_index_] =
+                        kReverbInputGain * (mono + 0.45F * side) + reverb_feedback * h0;
+                reverb_delay_lines_[1][reverb_delay_index_] =
+                        kReverbInputGain * (mono - 0.45F * side) + reverb_feedback * h1;
+                reverb_delay_lines_[2][reverb_delay_index_] =
+                        kReverbInputGain * (-mono + 0.45F * side) + reverb_feedback * h2;
+                reverb_delay_lines_[3][reverb_delay_index_] =
+                        kReverbInputGain * (-mono - 0.45F * side) + reverb_feedback * h3;
+
+                const float wet_left = 0.5F *
+                        (delayed[0] + delayed[1] - delayed[2] + delayed[3]);
+                const float wet_right = 0.5F *
+                        (delayed[0] - delayed[1] + delayed[2] + delayed[3]);
+                samples[left_index] = dry_left * reverb_dry_gain +
+                        wet_left * reverb_wet_gain;
+                if (config_.channel_count == 2) {
+                    samples[right_index] = dry_right * reverb_dry_gain +
+                            wet_right * reverb_wet_gain;
+                }
+                reverb_delay_index_ =
+                        (reverb_delay_index_ + 1) % kReverbDelayCapacity;
             }
 
             float frame_peak = 0.0F;

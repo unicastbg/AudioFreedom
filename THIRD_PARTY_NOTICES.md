@@ -34,6 +34,42 @@ Source: <https://github.com/LSPosed/AndroidHiddenApiBypass>
 
 License: [Apache License 2.0](LICENSES/Apache-2.0.txt)
 
+## llama.cpp
+
+The optional local language-model runtime embeds selected llama.cpp sources at the pinned
+commit recorded by the `third_party/llama.cpp` Git submodule.
+
+Copyright 2023-2026 The ggml authors. Licensed under the MIT License.
+
+Source: <https://github.com/ggml-org/llama.cpp>
+
+License: [MIT License](LICENSES/MIT.txt)
+
+## whisper.cpp
+
+The optional offline speech-recognition runtime embeds selected whisper.cpp sources at the
+pinned commit recorded by the `third_party/whisper.cpp` Git submodule.
+
+Copyright 2023-2026 The ggml authors. Licensed under the MIT License.
+
+Source: <https://github.com/ggml-org/whisper.cpp>
+
+License: [MIT License](LICENSES/MIT.txt)
+
+## Optional model downloads
+
+AudioFreedom does not bundle model weights in the APK. When requested by the user, it can
+download a checksum-pinned Qwen3 0.6B GGUF model from ggml-org's conversion repository and
+the multilingual Whisper Tiny model from the whisper.cpp model repository.
+
+Qwen3 0.6B source: <https://huggingface.co/Qwen/Qwen3-0.6B>
+
+Qwen3 GGUF conversion: <https://huggingface.co/ggml-org/Qwen3-0.6B-GGUF>
+
+Whisper model source: <https://github.com/openai/whisper>
+
+Whisper GGML conversion: <https://huggingface.co/ggerganov/whisper.cpp>
+
 ## AudioFreedom original source
 
 The notices above apply only to the identified third-party portions. AudioFreedom's

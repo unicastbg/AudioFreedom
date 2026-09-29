@@ -25,6 +25,11 @@ internal data class AudioFreedomSettings(
     val immersiveWidthPercent: Int = 60,
     val immersiveCenterPercent: Int = 60,
     val immersiveRoomPercent: Int = 25,
+    val reverbEnabled: Boolean = false,
+    val reverbAmountPercent: Int = 25,
+    val reverbSpacePercent: Int = 45,
+    val reverbDampingPercent: Int = 50,
+    val reverbDecayMilliseconds: Int = 1400,
     val limiterEnabled: Boolean = true,
     val limiterThresholdMillibels: Int = -100,
     val limiterReleaseMilliseconds: Int = 120,
@@ -49,6 +54,11 @@ internal fun EqualizerPreset.applyTo(current: AudioFreedomSettings): AudioFreedo
         immersiveWidthPercent = current.immersiveWidthPercent,
         immersiveCenterPercent = current.immersiveCenterPercent,
         immersiveRoomPercent = current.immersiveRoomPercent,
+        reverbEnabled = current.reverbEnabled,
+        reverbAmountPercent = current.reverbAmountPercent,
+        reverbSpacePercent = current.reverbSpacePercent,
+        reverbDampingPercent = current.reverbDampingPercent,
+        reverbDecayMilliseconds = current.reverbDecayMilliseconds,
         limiterEnabled = current.limiterEnabled,
         limiterThresholdMillibels = current.limiterThresholdMillibels,
         limiterReleaseMilliseconds = current.limiterReleaseMilliseconds,
@@ -78,6 +88,37 @@ internal enum class BassFoundationPreset(
                 it.cutoffHz == settings.bassCutoffHz &&
                     it.smallDriverSupportPercent == settings.bassDynamicsPercent
             }
+    }
+}
+
+internal enum class ReverbPreset(
+    val label: String,
+    val amountPercent: Int,
+    val spacePercent: Int,
+    val dampingPercent: Int,
+    val decayMilliseconds: Int,
+) {
+    Studio("Studio", 18, 30, 60, 800),
+    Room("Room", 28, 45, 50, 1400),
+    Hall("Hall", 38, 75, 42, 2600),
+    Arena("Arena", 48, 95, 35, 4200),
+    ;
+
+    fun applyTo(settings: AudioFreedomSettings): AudioFreedomSettings = settings.copy(
+        reverbEnabled = true,
+        reverbAmountPercent = amountPercent,
+        reverbSpacePercent = spacePercent,
+        reverbDampingPercent = dampingPercent,
+        reverbDecayMilliseconds = decayMilliseconds,
+    )
+
+    companion object {
+        fun matching(settings: AudioFreedomSettings): ReverbPreset? = entries.firstOrNull {
+            it.amountPercent == settings.reverbAmountPercent &&
+                it.spacePercent == settings.reverbSpacePercent &&
+                it.dampingPercent == settings.reverbDampingPercent &&
+                it.decayMilliseconds == settings.reverbDecayMilliseconds
+        }
     }
 }
 
@@ -204,6 +245,11 @@ internal object AudioFreedomSettingsStore {
     private const val KeyImmersiveWidth = "immersive_width_percent"
     private const val KeyImmersiveCenter = "immersive_center_percent"
     private const val KeyImmersiveRoom = "immersive_room_percent"
+    private const val KeyReverbEnabled = "reverb_enabled"
+    private const val KeyReverbAmount = "reverb_amount_percent"
+    private const val KeyReverbSpace = "reverb_space_percent"
+    private const val KeyReverbDamping = "reverb_damping_percent"
+    private const val KeyReverbDecay = "reverb_decay_milliseconds"
     private const val KeyLimiterEnabled = "limiter_enabled"
     private const val KeyLimiterThreshold = "limiter_threshold_millibels"
     private const val KeyLimiterRelease = "limiter_release_milliseconds"
@@ -234,6 +280,15 @@ internal object AudioFreedomSettingsStore {
                 preferences.getInt(KeyImmersiveCenter, 60).coerceIn(0, 100),
             immersiveRoomPercent =
                 preferences.getInt(KeyImmersiveRoom, 25).coerceIn(0, 100),
+            reverbEnabled = preferences.getBoolean(KeyReverbEnabled, false),
+            reverbAmountPercent =
+                preferences.getInt(KeyReverbAmount, 25).coerceIn(0, 100),
+            reverbSpacePercent =
+                preferences.getInt(KeyReverbSpace, 45).coerceIn(0, 100),
+            reverbDampingPercent =
+                preferences.getInt(KeyReverbDamping, 50).coerceIn(0, 100),
+            reverbDecayMilliseconds =
+                preferences.getInt(KeyReverbDecay, 1400).coerceIn(300, 5000),
             limiterEnabled = preferences.getBoolean(KeyLimiterEnabled, true),
             limiterThresholdMillibels =
                 preferences.getInt(KeyLimiterThreshold, -100).coerceIn(-600, 0),
@@ -260,6 +315,14 @@ internal object AudioFreedomSettingsStore {
             .putInt(KeyImmersiveWidth, settings.immersiveWidthPercent.coerceIn(0, 100))
             .putInt(KeyImmersiveCenter, settings.immersiveCenterPercent.coerceIn(0, 100))
             .putInt(KeyImmersiveRoom, settings.immersiveRoomPercent.coerceIn(0, 100))
+            .putBoolean(KeyReverbEnabled, settings.reverbEnabled)
+            .putInt(KeyReverbAmount, settings.reverbAmountPercent.coerceIn(0, 100))
+            .putInt(KeyReverbSpace, settings.reverbSpacePercent.coerceIn(0, 100))
+            .putInt(KeyReverbDamping, settings.reverbDampingPercent.coerceIn(0, 100))
+            .putInt(
+                KeyReverbDecay,
+                settings.reverbDecayMilliseconds.coerceIn(300, 5000),
+            )
             .putBoolean(KeyLimiterEnabled, settings.limiterEnabled)
             .putInt(KeyLimiterThreshold, settings.limiterThresholdMillibels.coerceIn(-600, 0))
             .putInt(KeyLimiterRelease, settings.limiterReleaseMilliseconds.coerceIn(20, 1000))

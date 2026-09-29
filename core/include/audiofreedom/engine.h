@@ -58,6 +58,16 @@ public:
     static constexpr std::uint32_t kDefaultImmersiveCenterPercent = 60;
     static constexpr std::uint32_t kDefaultImmersiveRoomPercent = 25;
     static constexpr std::size_t kImmersiveDelayCapacity = 8192;
+    static constexpr std::uint32_t kMinReverbPercent = 0;
+    static constexpr std::uint32_t kMaxReverbPercent = 100;
+    static constexpr std::uint32_t kDefaultReverbAmountPercent = 25;
+    static constexpr std::uint32_t kDefaultReverbSpacePercent = 45;
+    static constexpr std::uint32_t kDefaultReverbDampingPercent = 50;
+    static constexpr std::uint32_t kMinReverbDecayMilliseconds = 300;
+    static constexpr std::uint32_t kMaxReverbDecayMilliseconds = 5000;
+    static constexpr std::uint32_t kDefaultReverbDecayMilliseconds = 1400;
+    static constexpr std::size_t kReverbDelayLineCount = 4;
+    static constexpr std::size_t kReverbDelayCapacity = 16384;
     static constexpr std::array<float, kEqBandCount> kEqBandFrequenciesHz = {
             31.25F, 62.5F, 125.0F, 250.0F, 500.0F,
             1000.0F, 2000.0F, 4000.0F, 8000.0F, 16000.0F,
@@ -118,6 +128,17 @@ public:
     void set_immersive_room_percent(std::uint32_t percent) noexcept;
     [[nodiscard]] std::uint32_t immersive_room_percent() const noexcept;
 
+    void set_reverb_enabled(bool enabled) noexcept;
+    [[nodiscard]] bool reverb_enabled() const noexcept;
+    void set_reverb_amount_percent(std::uint32_t percent) noexcept;
+    [[nodiscard]] std::uint32_t reverb_amount_percent() const noexcept;
+    void set_reverb_space_percent(std::uint32_t percent) noexcept;
+    [[nodiscard]] std::uint32_t reverb_space_percent() const noexcept;
+    void set_reverb_damping_percent(std::uint32_t percent) noexcept;
+    [[nodiscard]] std::uint32_t reverb_damping_percent() const noexcept;
+    void set_reverb_decay_milliseconds(std::uint32_t milliseconds) noexcept;
+    [[nodiscard]] std::uint32_t reverb_decay_milliseconds() const noexcept;
+
     // Processes interleaved float PCM in place. No allocation or locking is performed.
     [[nodiscard]] bool process(float* samples, std::size_t frame_count) noexcept;
 
@@ -176,6 +197,12 @@ private:
     std::atomic<std::uint32_t> immersive_center_percent_{
             kDefaultImmersiveCenterPercent};
     std::atomic<std::uint32_t> immersive_room_percent_{kDefaultImmersiveRoomPercent};
+    std::atomic<bool> reverb_enabled_{false};
+    std::atomic<std::uint32_t> reverb_amount_percent_{kDefaultReverbAmountPercent};
+    std::atomic<std::uint32_t> reverb_space_percent_{kDefaultReverbSpacePercent};
+    std::atomic<std::uint32_t> reverb_damping_percent_{kDefaultReverbDampingPercent};
+    std::atomic<std::uint32_t> reverb_decay_milliseconds_{
+            kDefaultReverbDecayMilliseconds};
     std::array<BiquadCoefficients, kEqBandCount> eq_coefficients_{};
     std::array<std::array<BiquadState, kMaxChannelCount>, kEqBandCount> eq_states_{};
     std::array<bool, kEqBandCount> eq_band_active_{};
@@ -198,6 +225,11 @@ private:
     std::array<float, kImmersiveDelayCapacity> immersive_delay_right_{};
     std::size_t immersive_delay_index_ = 0;
     bool immersive_state_active_ = false;
+    std::array<std::array<float, kReverbDelayCapacity>, kReverbDelayLineCount>
+            reverb_delay_lines_{};
+    std::array<float, kReverbDelayLineCount> reverb_damping_states_{};
+    std::size_t reverb_delay_index_ = 0;
+    bool reverb_state_active_ = false;
     StreamConfig config_{};
 };
 

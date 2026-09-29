@@ -19,7 +19,7 @@ done
     "$MODDIR/direct-bind.sh" status
     if [ -r "$LIBRARY" ] && grep -q "$IMPL_UUID" "$CONFIG" 2>/dev/null; then
         echo "effect=available"
-        echo "dsp=preamp,10-band-eq,bass-foundation,detail-recovery,immersive-field,linked-limiter"
+        echo "dsp=preamp,10-band-eq,bass-foundation,detail-recovery,immersive-field,reverb,linked-limiter"
     else
         echo "effect=unavailable"
     fi

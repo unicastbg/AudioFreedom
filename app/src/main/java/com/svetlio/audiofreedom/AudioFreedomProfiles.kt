@@ -119,6 +119,21 @@ internal object AudioFreedomProfileStore {
                 immersiveRoomPercent = preferences.getInt(
                     key(id, "immersive_room"), defaults.immersiveRoomPercent,
                 ).coerceIn(0, 100),
+                reverbEnabled = preferences.getBoolean(
+                    key(id, "reverb_enabled"), defaults.reverbEnabled,
+                ),
+                reverbAmountPercent = preferences.getInt(
+                    key(id, "reverb_amount"), defaults.reverbAmountPercent,
+                ).coerceIn(0, 100),
+                reverbSpacePercent = preferences.getInt(
+                    key(id, "reverb_space"), defaults.reverbSpacePercent,
+                ).coerceIn(0, 100),
+                reverbDampingPercent = preferences.getInt(
+                    key(id, "reverb_damping"), defaults.reverbDampingPercent,
+                ).coerceIn(0, 100),
+                reverbDecayMilliseconds = preferences.getInt(
+                    key(id, "reverb_decay"), defaults.reverbDecayMilliseconds,
+                ).coerceIn(300, 5000),
                 limiterEnabled = preferences.getBoolean(
                     key(id, "limiter_enabled"), defaults.limiterEnabled,
                 ),
@@ -154,6 +169,11 @@ internal object AudioFreedomProfileStore {
         putInt(key(id, "immersive_width"), settings.immersiveWidthPercent)
         putInt(key(id, "immersive_center"), settings.immersiveCenterPercent)
         putInt(key(id, "immersive_room"), settings.immersiveRoomPercent)
+        putBoolean(key(id, "reverb_enabled"), settings.reverbEnabled)
+        putInt(key(id, "reverb_amount"), settings.reverbAmountPercent)
+        putInt(key(id, "reverb_space"), settings.reverbSpacePercent)
+        putInt(key(id, "reverb_damping"), settings.reverbDampingPercent)
+        putInt(key(id, "reverb_decay"), settings.reverbDecayMilliseconds)
         putBoolean(key(id, "limiter_enabled"), settings.limiterEnabled)
         putInt(key(id, "limiter_threshold"), settings.limiterThresholdMillibels)
         putInt(key(id, "limiter_release"), settings.limiterReleaseMilliseconds)
@@ -179,6 +199,11 @@ internal object AudioFreedomProfileStore {
         "immersive_width",
         "immersive_center",
         "immersive_room",
+        "reverb_enabled",
+        "reverb_amount",
+        "reverb_space",
+        "reverb_damping",
+        "reverb_decay",
         "limiter_enabled",
         "limiter_threshold",
         "limiter_release",

@@ -22,7 +22,7 @@ class AudioFreedomProtocolTest {
             byteArrayOf(0x41, 0x46, 0x58, 0x31),
             message.copyOfRange(0, 4),
         )
-        assertArrayEquals(byteArrayOf(1, 0, 5, 0), message.copyOfRange(4, 8))
+        assertArrayEquals(byteArrayOf(1, 0, 6, 0), message.copyOfRange(4, 8))
         assertArrayEquals(byteArrayOf(1, 0x10, 0, 0), message.copyOfRange(8, 12))
         assertArrayEquals(byteArrayOf(0x50, 0xFB.toByte(), 0xFF.toByte(), 0xFF.toByte()),
             message.copyOfRange(16, 20))
@@ -154,6 +154,29 @@ class AudioFreedomProtocolTest {
         assertArrayEquals(byteArrayOf(80, 0, 0, 0), message.copyOfRange(24, 28))
         assertArrayEquals(byteArrayOf(65, 0, 0, 0), message.copyOfRange(28, 32))
         assertArrayEquals(byteArrayOf(35, 0, 0, 0), message.copyOfRange(32, 36))
+    }
+
+    @Test
+    fun reverbConfigurationCarriesAllSettingsAtomically() {
+        val settings = AudioFreedomSettings(
+            reverbEnabled = true,
+            reverbAmountPercent = 38,
+            reverbSpacePercent = 75,
+            reverbDampingPercent = 42,
+            reverbDecayMilliseconds = 2600,
+        )
+        val message = AudioFreedomProtocol.reverbConfiguration(settings)
+
+        assertArrayEquals(byteArrayOf(0, 0x16, 0, 0), message.copyOfRange(8, 12))
+        assertArrayEquals(byteArrayOf(20, 0, 0, 0), message.copyOfRange(12, 16))
+        assertEquals(1, message[16].toInt())
+        assertArrayEquals(byteArrayOf(38, 0, 0, 0), message.copyOfRange(20, 24))
+        assertArrayEquals(byteArrayOf(75, 0, 0, 0), message.copyOfRange(24, 28))
+        assertArrayEquals(byteArrayOf(42, 0, 0, 0), message.copyOfRange(28, 32))
+        assertArrayEquals(
+            byteArrayOf(0x28, 0x0A, 0, 0),
+            message.copyOfRange(32, 36),
+        )
     }
 
     @Test

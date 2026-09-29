@@ -84,6 +84,15 @@ std::atomic<uint32_t> gImmersiveCenterPercent{
         audiofreedom::Engine::kDefaultImmersiveCenterPercent};
 std::atomic<uint32_t> gImmersiveRoomPercent{
         audiofreedom::Engine::kDefaultImmersiveRoomPercent};
+std::atomic<bool> gReverbEnabled{false};
+std::atomic<uint32_t> gReverbAmountPercent{
+        audiofreedom::Engine::kDefaultReverbAmountPercent};
+std::atomic<uint32_t> gReverbSpacePercent{
+        audiofreedom::Engine::kDefaultReverbSpacePercent};
+std::atomic<uint32_t> gReverbDampingPercent{
+        audiofreedom::Engine::kDefaultReverbDampingPercent};
+std::atomic<uint32_t> gReverbDecayMilliseconds{
+        audiofreedom::Engine::kDefaultReverbDecayMilliseconds};
 std::atomic<bool> gLimiterEnabled{true};
 std::atomic<int32_t> gLimiterThresholdMillibels{
         audiofreedom::Engine::kDefaultLimiterThresholdMillibels};
@@ -300,6 +309,15 @@ void AudioFreedomEffectContext::syncGlobalSettings() {
             gImmersiveCenterPercent.load(std::memory_order_acquire));
     mEngine.set_immersive_room_percent(
             gImmersiveRoomPercent.load(std::memory_order_acquire));
+    mEngine.set_reverb_enabled(gReverbEnabled.load(std::memory_order_acquire));
+    mEngine.set_reverb_amount_percent(
+            gReverbAmountPercent.load(std::memory_order_acquire));
+    mEngine.set_reverb_space_percent(
+            gReverbSpacePercent.load(std::memory_order_acquire));
+    mEngine.set_reverb_damping_percent(
+            gReverbDampingPercent.load(std::memory_order_acquire));
+    mEngine.set_reverb_decay_milliseconds(
+            gReverbDecayMilliseconds.load(std::memory_order_acquire));
     mEngine.set_limiter_enabled(gLimiterEnabled.load(std::memory_order_acquire));
     mEngine.set_limiter_threshold_millibels(
             gLimiterThresholdMillibels.load(std::memory_order_acquire));
@@ -520,6 +538,38 @@ RetCode AudioFreedomEffectContext::setParams(const std::vector<uint8_t>& params)
             }
             return RetCode::SUCCESS;
         }
+        case ParameterId::kReverbConfiguration: {
+            const auto configuration =
+                    audiofreedom::protocol::read_reverb_configuration(*message);
+            if (!configuration.has_value() ||
+                configuration->amount_percent > audiofreedom::Engine::kMaxReverbPercent ||
+                configuration->space_percent > audiofreedom::Engine::kMaxReverbPercent ||
+                configuration->damping_percent > audiofreedom::Engine::kMaxReverbPercent ||
+                configuration->decay_milliseconds <
+                        audiofreedom::Engine::kMinReverbDecayMilliseconds ||
+                configuration->decay_milliseconds >
+                        audiofreedom::Engine::kMaxReverbDecayMilliseconds) {
+                return RetCode::ERROR_ILLEGAL_PARAMETER;
+            }
+            mEngine.set_reverb_enabled(configuration->enabled);
+            mEngine.set_reverb_amount_percent(configuration->amount_percent);
+            mEngine.set_reverb_space_percent(configuration->space_percent);
+            mEngine.set_reverb_damping_percent(configuration->damping_percent);
+            mEngine.set_reverb_decay_milliseconds(configuration->decay_milliseconds);
+            if (getSessionId() == 0) {
+                gReverbEnabled.store(configuration->enabled, std::memory_order_release);
+                gReverbAmountPercent.store(configuration->amount_percent,
+                                           std::memory_order_release);
+                gReverbSpacePercent.store(configuration->space_percent,
+                                          std::memory_order_release);
+                gReverbDampingPercent.store(configuration->damping_percent,
+                                            std::memory_order_release);
+                gReverbDecayMilliseconds.store(configuration->decay_milliseconds,
+                                                std::memory_order_release);
+                gSettingsRevision.fetch_add(1, std::memory_order_acq_rel);
+            }
+            return RetCode::SUCCESS;
+        }
         default:
             return RetCode::ERROR_ILLEGAL_PARAMETER;
     }
@@ -554,6 +604,7 @@ std::optional<std::vector<uint8_t>> AudioFreedomEffectContext::getParams(
         case ParameterId::kDynamicBassConfiguration:
         case ParameterId::kDetailRecoveryConfiguration:
         case ParameterId::kImmersiveFieldConfiguration:
+        case ParameterId::kReverbConfiguration:
             return std::nullopt;
         case ParameterId::kDriverStatus: {
             const auto config = mEngine.stream_config();

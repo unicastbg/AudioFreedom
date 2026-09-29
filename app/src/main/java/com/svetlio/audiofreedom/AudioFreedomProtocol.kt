@@ -4,7 +4,7 @@ private const val WireMessageSize = 40
 private const val WireHeaderSize = 16
 private const val Magic = 0x31584641
 private const val ProtocolMajor = 1
-private const val ProtocolMinor = 5
+private const val ProtocolMinor = 6
 private const val ParameterPreamp = 0x1001
 private const val ParameterEqualizerEnabled = 0x1100
 private const val ParameterEqualizerBand = 0x1101
@@ -13,6 +13,7 @@ private const val ParameterLimiterConfiguration = 0x1200
 private const val ParameterDynamicBassConfiguration = 0x1300
 private const val ParameterDetailRecoveryConfiguration = 0x1400
 private const val ParameterImmersiveFieldConfiguration = 0x1500
+private const val ParameterReverbConfiguration = 0x1600
 private const val ParameterOutputMetrics = 0x2001
 
 internal data class AudioOutputMetrics(
@@ -82,6 +83,15 @@ internal object AudioFreedomProtocol {
             putInt(target, WireHeaderSize + 8, settings.immersiveWidthPercent)
             putInt(target, WireHeaderSize + 12, settings.immersiveCenterPercent)
             putInt(target, WireHeaderSize + 16, settings.immersiveRoomPercent)
+        }
+
+    fun reverbConfiguration(settings: AudioFreedomSettings): ByteArray =
+        message(ParameterReverbConfiguration, 20).also { target ->
+            target[WireHeaderSize] = if (settings.reverbEnabled) 1 else 0
+            putInt(target, WireHeaderSize + 4, settings.reverbAmountPercent)
+            putInt(target, WireHeaderSize + 8, settings.reverbSpacePercent)
+            putInt(target, WireHeaderSize + 12, settings.reverbDampingPercent)
+            putInt(target, WireHeaderSize + 16, settings.reverbDecayMilliseconds)
         }
 
     fun outputMetricsQuery(): ByteArray = message(ParameterOutputMetrics, 0)

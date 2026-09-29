@@ -22,3 +22,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "AudioFreedom"
 include(":app")
+include(":assistant-runtime")
+include(":voice-runtime")

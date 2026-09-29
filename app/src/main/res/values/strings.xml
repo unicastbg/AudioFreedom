@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="assistant_widget_name">AudioFreedom voice</string>
+    <string name="assistant_widget_description">Start an AudioFreedom voice command</string>
+</resources>

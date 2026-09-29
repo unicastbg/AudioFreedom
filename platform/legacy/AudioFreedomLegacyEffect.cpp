@@ -191,6 +191,22 @@ bool applyMessage(audiofreedom::Engine& engine, const WireMessage& message) {
             engine.set_immersive_room_percent(value->room_percent);
             return true;
         }
+        case ParameterId::kReverbConfiguration: {
+            const auto value = audiofreedom::protocol::read_reverb_configuration(message);
+            if (!value || value->amount_percent > audiofreedom::Engine::kMaxReverbPercent ||
+                value->space_percent > audiofreedom::Engine::kMaxReverbPercent ||
+                value->damping_percent > audiofreedom::Engine::kMaxReverbPercent ||
+                value->decay_milliseconds <
+                        audiofreedom::Engine::kMinReverbDecayMilliseconds ||
+                value->decay_milliseconds >
+                        audiofreedom::Engine::kMaxReverbDecayMilliseconds) return false;
+            engine.set_reverb_enabled(value->enabled);
+            engine.set_reverb_amount_percent(value->amount_percent);
+            engine.set_reverb_space_percent(value->space_percent);
+            engine.set_reverb_damping_percent(value->damping_percent);
+            engine.set_reverb_decay_milliseconds(value->decay_milliseconds);
+            return true;
+        }
         default:
             return false;
     }

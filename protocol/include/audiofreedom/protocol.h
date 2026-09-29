@@ -8,7 +8,7 @@ namespace audiofreedom::protocol {
 
 inline constexpr std::uint32_t kMagic = 0x31584641;  // "AFX1" in little-endian wire order.
 inline constexpr std::uint16_t kProtocolMajor = 1;
-inline constexpr std::uint16_t kProtocolMinor = 5;
+inline constexpr std::uint16_t kProtocolMinor = 6;
 
 enum class ParameterId : std::uint32_t {
     kProtocolVersion = 0x0000,
@@ -21,6 +21,7 @@ enum class ParameterId : std::uint32_t {
     kDynamicBassConfiguration = 0x1300,
     kDetailRecoveryConfiguration = 0x1400,
     kImmersiveFieldConfiguration = 0x1500,
+    kReverbConfiguration = 0x1600,
     kDriverStatus = 0x2000,
     kOutputMetrics = 0x2001,
 };
@@ -64,6 +65,14 @@ struct ImmersiveFieldConfiguration final {
     std::uint32_t room_percent = 25;
 };
 
+struct ReverbConfiguration final {
+    bool enabled = false;
+    std::uint32_t amount_percent = 25;
+    std::uint32_t space_percent = 45;
+    std::uint32_t damping_percent = 50;
+    std::uint32_t decay_milliseconds = 1400;
+};
+
 struct OutputMetrics final {
     std::int32_t input_peak_millibels = -12000;
     std::int32_t output_peak_millibels = -12000;
@@ -99,6 +108,7 @@ static_assert(std::is_trivially_copyable_v<LimiterConfiguration>);
 static_assert(std::is_trivially_copyable_v<DynamicBassConfiguration>);
 static_assert(std::is_trivially_copyable_v<DetailRecoveryConfiguration>);
 static_assert(std::is_trivially_copyable_v<ImmersiveFieldConfiguration>);
+static_assert(std::is_trivially_copyable_v<ReverbConfiguration>);
 static_assert(std::is_trivially_copyable_v<OutputMetrics>);
 
 }  // namespace audiofreedom::protocol

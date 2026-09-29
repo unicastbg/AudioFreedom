@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/assistant_voice_widget"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="6dp"
+    android:contentDescription="@string/assistant_widget_description">
+
+    <ImageView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/widget_voice_background"
+        android:contentDescription="@string/assistant_widget_description"
+        android:padding="16dp"
+        android:src="@drawable/ic_widget_mic" />
+</FrameLayout>
