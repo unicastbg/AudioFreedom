@@ -130,6 +130,13 @@ Installing the module requires Magisk, KernelSU, or a compatible root-module man
 a reboot. Disabling or uninstalling the module and rebooting removes its systemless
 mounts. Back up important data before testing any root module.
 
+## Support AudioFreedom
+
+If you would like to support this project and its continued development, please
+[donate through PayPal](https://www.paypal.com/ncp/payment/LGTB745KAUHRE). There is no
+fixed amount; contribute only what you are comfortable with. Donations are optional and
+do not affect access to AudioFreedom.
+
 ## Licensing
 
 AudioFreedom's original source is publicly visible but is not open-source software at
