@@ -80,6 +80,11 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission(),
     ) { }
 
+    override fun onResume() {
+        super.onResume()
+        AssistantHandsFreeService.sync(this)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val initialDriverState = probeDriver()
@@ -88,7 +93,7 @@ class MainActivity : ComponentActivity() {
         var appPreferences by mutableStateOf(AppPreferencesStore.load(this))
         AssistantRuntimeManager.initialize(this)
         AssistantRuntimeManager.updatePolicy(
-            appPreferences.assistantEnabled,
+            appPreferences.assistantEnabled && appPreferences.assistantConversationalTuning,
             appPreferences.assistantKeepWarm,
         )
         if (initialEnabled) {
@@ -124,6 +129,7 @@ class MainActivity : ComponentActivity() {
                         AppPreferencesStore.save(this, it)
                         appPreferences = it
                         AudioFreedomService.refreshStatus(this)
+                        AssistantHandsFreeService.sync(this)
                     },
                 )
             }
@@ -219,14 +225,17 @@ private fun ControllerScreen(
     val voiceAudioSession = remember {
         VoiceCommandAudioSession(context.applicationContext)
     }
+    var buttonPermissionRequest by remember { mutableStateOf(false) }
     val microphonePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         if (granted) {
-            voiceCaptureRequest++
+            if (buttonPermissionRequest) AssistantHandsFreeService.sync(context)
+            else voiceCaptureRequest++
         } else {
             assistantMessage = "Microphone permission is required for voice commands."
         }
+        buttonPermissionRequest = false
     }
     var languageModelInfo by remember {
         mutableStateOf(AssistantRuntimeManager.languageModelInfo())
@@ -240,6 +249,7 @@ private fun ControllerScreen(
     }
     var modelMessage by remember { mutableStateOf<String?>(null) }
     var voiceTestMessage by remember { mutableStateOf<String?>(null) }
+    var voiceTestRunning by remember { mutableStateOf(false) }
     var widgetMessage by remember { mutableStateOf<String?>(null) }
 
     DisposableEffect(voiceRecorder, voiceAudioSession) {
@@ -384,15 +394,30 @@ private fun ControllerScreen(
         }
     }
 
-    LaunchedEffect(appPreferences.assistantEnabled, appPreferences.assistantKeepWarm) {
+    LaunchedEffect(appPreferences.assistantEnabled, appPreferences.assistantConversationalTuning,
+        appPreferences.assistantKeepWarm) {
         AssistantRuntimeManager.updatePolicy(
-            appPreferences.assistantEnabled,
+            appPreferences.assistantEnabled && appPreferences.assistantConversationalTuning,
             appPreferences.assistantKeepWarm,
         )
     }
 
     LaunchedEffect(Unit) {
         while (true) {
+            val storedPreferences = AppPreferencesStore.load(context)
+            if (storedPreferences != appPreferences) appPreferences = storedPreferences
+            val storedSettings = AudioFreedomSettingsStore.load(context)
+            if (storedSettings != settings) {
+                settings = storedSettings
+                selectedPreset = EqualizerPreset.matching(settings)
+                selectedBassPreset = BassFoundationPreset.matching(settings)
+                selectedDetailPreset = DetailRecoveryPreset.matching(settings)
+                selectedImmersivePreset = ImmersiveFieldPreset.matching(settings)
+                selectedReverbPreset = ReverbPreset.matching(settings)
+                selectedProfileId = profiles.firstOrNull { it.settings == settings }?.id
+                assistantProposal = null
+                assistantUndoSettings = AssistantUndoStore.load(context)
+            }
             val detectedRoute = AudioRouteDetector.current(context)
             if (detectedRoute.id != audioRoute.id) {
                 audioRoute = detectedRoute
@@ -417,7 +442,7 @@ private fun ControllerScreen(
         }
         assistantUndoSettings = settings
         assistantUndoProfileId = selectedProfileId
-        AssistantUndoStore.save(context, settings)
+        AssistantUndoStore.save(context, settings, proposal.settings)
         commitSettings(proposal.settings, keepAssistantUndo = true)
         proposal.selectedProfileId?.let { selectedProfileId = it }
         assistantProposal = null
@@ -442,6 +467,24 @@ private fun ControllerScreen(
         assistantFeedbackCandidate = null
         assistantScope.launch {
             try {
+                val control = AssistantConversationCommands.recognize(command)
+                if (control != null) {
+                    val language = HandsFreeVoicePolicy.replyLanguage(appPreferences.assistantLanguage, command)
+                    assistantProposal = null
+                    assistantMessage = AssistantConversationCommands.response(control, language)
+                    if (speakBeforeAutomaticApply) {
+                        when (voiceAudioSession.speak(assistantMessage.orEmpty(), language, 30_000L)) {
+                            SpokenConfirmationResult.NoSpeechEngine ->
+                                assistantMessage += " No Android text-to-speech engine is installed or enabled."
+                            SpokenConfirmationResult.NoOfflineVoice ->
+                                assistantMessage += " No offline ${language.label} speech voice is installed."
+                            SpokenConfirmationResult.Failed ->
+                                assistantMessage += " Android could not play the spoken reply."
+                            SpokenConfirmationResult.Spoken -> Unit
+                        }
+                    }
+                    return@launch
+                }
                 val result = AssistantRuntimeManager.plan(
                     AssistantRequest(
                         command = command,
@@ -473,6 +516,8 @@ private fun ControllerScreen(
                         if (shouldApplyAutomatically) {
                             applyAssistantProposal(proposal)
                             assistantMessage = when (spokenResult) {
+                                SpokenConfirmationResult.NoSpeechEngine ->
+                                    "Applied. No Android text-to-speech engine is installed or enabled. Check Local assistant > Spoken replies."
                                 SpokenConfirmationResult.NoOfflineVoice ->
                                     "Applied. Install an offline system speech voice to hear confirmations."
                                 SpokenConfirmationResult.Failed ->
@@ -482,6 +527,8 @@ private fun ControllerScreen(
                         } else {
                             assistantProposal = proposal
                             assistantMessage = when (spokenResult) {
+                                SpokenConfirmationResult.NoSpeechEngine ->
+                                    "No Android text-to-speech engine is installed or enabled. Check Local assistant > Spoken replies."
                                 SpokenConfirmationResult.NoOfflineVoice ->
                                     "Install an offline system speech voice to hear confirmations."
                                 SpokenConfirmationResult.Failed ->
@@ -512,6 +559,8 @@ private fun ControllerScreen(
                             assistantProposal = null
                             assistantCommand = ""
                             assistantMessage = when (spokenResult) {
+                                SpokenConfirmationResult.NoSpeechEngine ->
+                                    "Settings restored. No Android text-to-speech engine is installed or enabled. Check Local assistant > Spoken replies."
                                 SpokenConfirmationResult.NoOfflineVoice ->
                                     "Settings restored. Install an offline system speech voice to hear confirmations."
                                 SpokenConfirmationResult.Failed ->
@@ -542,6 +591,7 @@ private fun ControllerScreen(
         assistantMessage = null
         assistantVoiceState = AssistantVoiceState.Listening
         var commandWillReleaseAudioFocus = false
+        voiceAudioSession.beginManualSession()
         if (appPreferences.assistantPauseMediaForVoice) {
             voiceAudioSession.requestPlaybackPause()
         }
@@ -555,37 +605,10 @@ private fun ControllerScreen(
                 }
                 is VoiceRecordingResult.Audio -> {
                     assistantVoiceState = AssistantVoiceState.Transcribing
-                    val automaticTranscript = AssistantVoiceRuntimeManager.transcribe(
+                    val transcript = AssistantVoiceRuntimeManager.transcribe(
                         recording.samples,
-                        appPreferences.assistantLanguage,
+                        AssistantLanguage.English,
                     )
-                    val transcript = if (
-                        appPreferences.assistantLanguage == AssistantLanguage.Automatic &&
-                        !isSupportedAssistantCommand(
-                            automaticTranscript,
-                            settings,
-                            profiles,
-                            appPreferences,
-                        )
-                    ) {
-                        val bulgarianTranscript = AssistantVoiceRuntimeManager.transcribe(
-                            recording.samples,
-                            AssistantLanguage.Bulgarian,
-                        )
-                        chooseAutomaticVoiceTranscript(
-                            primary = automaticTranscript,
-                            bulgarian = bulgarianTranscript,
-                        ) { candidate ->
-                            isSupportedAssistantCommand(
-                                candidate,
-                                settings,
-                                profiles,
-                                appPreferences,
-                            )
-                        }
-                    } else {
-                        automaticTranscript
-                    }
                     if (transcript.isBlank()) {
                         assistantMessage = "No speech was recognized."
                     } else {
@@ -742,10 +765,18 @@ private fun ControllerScreen(
                 modelDownloadProgress = modelDownloadProgress,
                 modelMessage = modelMessage,
                 voiceTestMessage = voiceTestMessage,
+                voiceTestRunning = voiceTestRunning || assistantVoiceState != AssistantVoiceState.Idle,
                 widgetMessage = widgetMessage,
                 onPreferencesChanged = { updated ->
                     appPreferences = updated
                     onAppPreferencesChanged(updated)
+                    if (updated.assistantVoiceMode == AssistantVoiceMode.VolumeButton &&
+                        updated.assistantVoiceEnabled && updated.assistantEnabled &&
+                        context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+                        PackageManager.PERMISSION_GRANTED) {
+                        buttonPermissionRequest = true
+                        microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
                 },
                 onAddVoiceWidget = {
                     widgetMessage = requestAssistantVoiceWidget(context)
@@ -765,25 +796,32 @@ private fun ControllerScreen(
                 onRemoveVoiceModel = {
                     removeModelPack(AssistantModelPackType.Voice)
                 },
-                onTestVoice = {
+                onTestVoice = { language ->
+                    voiceTestRunning = true
                     voiceTestMessage = null
                     if (appPreferences.assistantPauseMediaForVoice) {
                         voiceAudioSession.requestPlaybackPause()
                     }
                     assistantScope.launch {
-                        val result = voiceAudioSession.speakPlannedChange(
-                            change = "Voice confirmation is ready",
-                            applying = false,
-                        )
-                        voiceTestMessage = when (result) {
-                            SpokenConfirmationResult.Spoken ->
-                                "Offline voice confirmation is working"
-                            SpokenConfirmationResult.NoOfflineVoice ->
-                                "No offline English system voice is installed"
-                            SpokenConfirmationResult.Failed ->
-                                "Android could not play the offline system voice"
+                        try {
+                            val result = voiceAudioSession.speak(
+                                "Hello! I am listening. Shall I increase the bass and reduce the treble?",
+                                language,
+                            )
+                            voiceTestMessage = when (result) {
+                                SpokenConfirmationResult.NoSpeechEngine ->
+                                    "No Android text-to-speech engine is installed or enabled"
+                                SpokenConfirmationResult.Spoken ->
+                                    "Offline voice confirmation is working"
+                                SpokenConfirmationResult.NoOfflineVoice ->
+                                    "No offline ${language.label} system voice is installed"
+                                SpokenConfirmationResult.Failed ->
+                                    "Android could not play the offline system voice"
+                            }
+                        } finally {
+                            voiceAudioSession.restorePlayback()
+                            voiceTestRunning = false
                         }
-                        voiceAudioSession.restorePlayback()
                     }
                 },
                 modifier = Modifier.padding(contentPadding),

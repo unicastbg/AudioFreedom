@@ -21,6 +21,7 @@ import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.SegmentedButton
@@ -30,15 +31,20 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.delay
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontWeight
+import kotlin.math.roundToInt
 
 @Composable
 internal fun AssistantSettingsScreen(
@@ -49,6 +55,7 @@ internal fun AssistantSettingsScreen(
     modelDownloadProgress: AssistantModelDownloadProgress?,
     modelMessage: String?,
     voiceTestMessage: String?,
+    voiceTestRunning: Boolean,
     widgetMessage: String?,
     onPreferencesChanged: (AppPreferences) -> Unit,
     onAddVoiceWidget: () -> Unit,
@@ -57,11 +64,21 @@ internal fun AssistantSettingsScreen(
     onRemoveLanguageModel: () -> Unit,
     onInstallVoiceModel: () -> Unit,
     onRemoveVoiceModel: () -> Unit,
-    onTestVoice: () -> Unit,
+    onTestVoice: (AssistantLanguage) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    var shortcutEnabled by remember { mutableStateOf(VolumeButtonAccessibilityService.enabled(context)) }
+    LaunchedEffect(context) {
+        while (true) {
+            shortcutEnabled = VolumeButtonAccessibilityService.enabled(context)
+            delay(1000)
+        }
+    }
     var commandGuideExpanded by rememberSaveable { mutableStateOf(false) }
     var advancedModelOptionsExpanded by rememberSaveable { mutableStateOf(false) }
+    var experimentalExpanded by rememberSaveable { mutableStateOf(false) }
+    var tuningGuideExpanded by rememberSaveable { mutableStateOf(false) }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -155,30 +172,14 @@ internal fun AssistantSettingsScreen(
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-        AssistantSettingsSectionTitle("Language and voice")
+        AssistantSettingsSectionTitle("Voice commands")
         Text(
-            "Command language",
+            "English only",
             modifier = Modifier.padding(bottom = 8.dp),
             style = MaterialTheme.typography.bodyLarge,
         )
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            AssistantLanguage.entries.forEachIndexed { index, language ->
-                SegmentedButton(
-                    selected = preferences.assistantLanguage == language,
-                    onClick = {
-                        onPreferencesChanged(preferences.copy(assistantLanguage = language))
-                    },
-                    shape = SegmentedButtonDefaults.itemShape(
-                        index = index,
-                        count = AssistantLanguage.entries.size,
-                    ),
-                ) {
-                    Text(language.label)
-                }
-            }
-        }
         Text(
-            "Automatic retries short unrecognized commands as Bulgarian. Select Bulgarian for the most consistent Cyrillic transcription.",
+            "Recognition, spoken replies, and supported assistant commands use English. Other languages are not supported in this version.",
             modifier = Modifier.padding(top = 8.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium,
@@ -189,10 +190,10 @@ internal fun AssistantSettingsScreen(
         ) {
             Icon(Icons.Rounded.Mic, contentDescription = null)
             Column(modifier = Modifier.padding(start = 16.dp).weight(1F)) {
-                Text("Push-to-talk", style = MaterialTheme.typography.bodyLarge)
+                Text("Voice input", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     if (voiceModelInfo.installed) {
-                        "Transcribe spoken commands locally with Whisper"
+                        "Offline voice input for push-to-talk and volume-button commands"
                     } else {
                         "Turn on to install the optional 75 MB voice language pack"
                     },
@@ -224,7 +225,8 @@ internal fun AssistantSettingsScreen(
                     onClick = {
                         onPreferencesChanged(preferences.copy(assistantVoiceMode = mode))
                     },
-                    enabled = mode == AssistantVoiceMode.PushToTalk,
+                    enabled = mode == AssistantVoiceMode.PushToTalk ||
+                        (preferences.assistantEnabled && preferences.assistantVoiceEnabled && voiceModelInfo.installed),
                     shape = SegmentedButtonDefaults.itemShape(
                         index = index,
                         count = AssistantVoiceMode.entries.size,
@@ -235,11 +237,76 @@ internal fun AssistantSettingsScreen(
             }
         }
         Text(
-            "The planned Audio Freedom wake phrase needs a separate low-power keyword pack. It is disabled until that runtime is ready.",
+            "The microphone stays off between commands. Button-triggered changes require spoken confirmation.",
             modifier = Modifier.padding(top = 8.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium,
         )
+        if (!preferences.assistantEnabled || !preferences.assistantVoiceEnabled || !voiceModelInfo.installed) {
+            Text(
+                "To select Volume button, enable the assistant and Voice input, and install the voice language pack.",
+                modifier = Modifier.padding(top = 8.dp),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (preferences.assistantVoiceMode == AssistantVoiceMode.VolumeButton) {
+            AssistantSettingsSectionTitle("Volume button shortcut")
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                AssistantVolumeButton.entries.forEachIndexed { index, button ->
+                    SegmentedButton(
+                        selected = preferences.assistantVolumeButton == button,
+                        onClick = { onPreferencesChanged(preferences.copy(assistantVolumeButton = button)) },
+                        shape = SegmentedButtonDefaults.itemShape(index, AssistantVolumeButton.entries.size),
+                    ) { Text(button.label) }
+                }
+            }
+            VoiceTimingSlider("Hold to activate",
+                "${preferences.assistantButtonHoldMilliseconds / 1000F} seconds",
+                preferences.assistantButtonHoldMilliseconds.toFloat(), 500F..3000F, 9) {
+                onPreferencesChanged(preferences.copy(assistantButtonHoldMilliseconds = it.roundToInt()))
+            }
+            Text(if (shortcutEnabled) "Button shortcut enabled" else "Button shortcut needs Accessibility permission",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick = { VolumeButtonAccessibilityService.openSettings(context) }) {
+                Text(if (shortcutEnabled) "Accessibility settings" else "Enable button shortcut")
+            }
+            Text("Press the selected volume button again to cancel listening or a spoken reply.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(AssistantHandsFreeService.status,
+                modifier = Modifier.padding(top = 8.dp),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (AssistantHandsFreeService.captureDetail.isNotBlank()) {
+                Text(AssistantHandsFreeService.captureDetail,
+                    modifier = Modifier.padding(top = 4.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (AssistantHandsFreeService.recognizedCommand.isNotBlank()) {
+                Text("Last heard: ${AssistantHandsFreeService.recognizedCommand}",
+                    modifier = Modifier.padding(top = 4.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        AssistantSettingsSectionTitle("Voice timing")
+            VoiceTimingSlider("End-of-command pause",
+                "${preferences.assistantSilenceMilliseconds / 1000F} seconds",
+                preferences.assistantSilenceMilliseconds.toFloat(), 500F..3000F, 9) {
+                onPreferencesChanged(preferences.copy(assistantSilenceMilliseconds = it.roundToInt()))
+            }
+            VoiceTimingSlider("Wait for speech", "${preferences.assistantSpeechWaitSeconds} seconds",
+                preferences.assistantSpeechWaitSeconds.toFloat(), 3F..15F, 11) {
+                onPreferencesChanged(preferences.copy(assistantSpeechWaitSeconds = it.roundToInt()))
+            }
+            VoiceTimingSlider("Wait for confirmation", "${preferences.assistantConfirmationWaitSeconds} seconds",
+                preferences.assistantConfirmationWaitSeconds.toFloat(), 3F..15F, 11) {
+                onPreferencesChanged(preferences.copy(assistantConfirmationWaitSeconds = it.roundToInt()))
+            }
+        if (preferences.assistantVoiceMode == AssistantVoiceMode.PushToTalk) {
         AssistantSettingsSwitchRow(
             title = "Apply after recognition",
             summary = "Run a recognized command without reviewing it on screen",
@@ -267,20 +334,8 @@ internal fun AssistantSettingsScreen(
                 onPreferencesChanged(preferences.copy(assistantSpeakVoiceConfirmation = it))
             },
         )
-        TextButton(
-            onClick = onTestVoice,
-            enabled = voiceModelInfo.installed,
-        ) {
-            Text("Test offline voice")
         }
-        voiceTestMessage?.let { message ->
-            Text(
-                message,
-                modifier = Modifier.padding(bottom = 8.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
+        AssistantSpeechSettings(preferences, onPreferencesChanged, voiceTestRunning, voiceTestMessage, onTestVoice)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         AssistantSettingsSectionTitle("Safety")
@@ -324,6 +379,51 @@ internal fun AssistantSettingsScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium,
         )
+        AssistantModelRow(
+            title = "Voice language pack",
+            summary = modelPackSummary(voiceModelInfo, AssistantModelCatalog.voice),
+            busy = activeModelPack == AssistantModelPackType.Voice,
+            actionsEnabled = activeModelPack == null,
+            progress = modelDownloadProgress.takeIf { activeModelPack == AssistantModelPackType.Voice },
+            primaryAction = when {
+                !voiceModelInfo.installed -> "Install"
+                voiceModelInfo.hasUpdate(AssistantModelCatalog.voice) -> "Update"
+                else -> null
+            },
+            onPrimaryAction = onInstallVoiceModel,
+            secondaryAction = "Remove".takeIf { voiceModelInfo.installed },
+            onSecondaryAction = onRemoveVoiceModel,
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Row(modifier = Modifier.fillMaxWidth().clickable { experimentalExpanded = !experimentalExpanded }
+            .padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Experimental features", modifier = Modifier.weight(1F), style = MaterialTheme.typography.titleMedium)
+            Icon(if (experimentalExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                contentDescription = if (experimentalExpanded) "Collapse experimental features" else "Expand experimental features")
+        }
+        if (experimentalExpanded) {
+        AssistantSettingsSwitchRow(
+            title = "Conversational tuning",
+            summary = "Optional local LLM for descriptive requests; every model proposal requires review",
+            checked = preferences.assistantConversationalTuning,
+            enabled = preferences.assistantEnabled && languageModelInfo.installed,
+            onCheckedChange = { onPreferencesChanged(preferences.copy(assistantConversationalTuning = it)) },
+        )
+        Row(modifier = Modifier.fillMaxWidth().clickable { tuningGuideExpanded = !tuningGuideExpanded }
+            .padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Tuning examples and limits", modifier = Modifier.weight(1F), style = MaterialTheme.typography.bodyLarge)
+            Icon(if (tuningGuideExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, contentDescription = null)
+        }
+        if (tuningGuideExpanded) {
+            Text("Standard commands work without a language model. Combine up to six simple commands; if any part is unclear, nothing is applied.",
+                style = MaterialTheme.typography.bodyMedium)
+            AssistantCommandExamples("Combined commands", "Higher bass and lower highs\nAdd bass and turn on reverb\nIncrease bass and treble")
+            AssistantCommandExamples("Conversational tuning", "Bring the vocals forward, soften the cymbals, and keep the bass unchanged\nMore detail without more brightness\nUndo half of the last bass change")
+            Text("The model proposes small changes to supported effects. Review the actual changes before applying. Preserved groups lock DSP controls, not a guarantee of identical perceived sound. Partial bass undo is available only while settings still match the last assistant change.",
+                modifier = Modifier.padding(top = 12.dp), style = MaterialTheme.typography.bodyMedium)
+            Text("Not available yet: automatic profile creation, A/B audition controls, spectrum-based diagnosis, or autonomous per-device tuning. The model cannot hear your headphones, fix physical distortion, restore missing information, or calibrate your ears. English requests only; it may misunderstand complex requests. Reject the proposal or use standard commands.",
+                modifier = Modifier.padding(top = 12.dp), style = MaterialTheme.typography.bodyMedium)
+        }
         AssistantSettingsSwitchRow(
             title = "On-device personalization",
             summary = "Use private thumbs up or down results to improve future assistant decisions",
@@ -358,22 +458,6 @@ internal fun AssistantSettingsScreen(
             onPrimaryAction = onInstallLanguageModel,
             secondaryAction = "Remove".takeIf { languageModelInfo.installed },
             onSecondaryAction = onRemoveLanguageModel,
-        )
-        AssistantModelRow(
-            title = "Voice language pack",
-            summary = modelPackSummary(voiceModelInfo, AssistantModelCatalog.voice),
-            busy = activeModelPack == AssistantModelPackType.Voice,
-            actionsEnabled = activeModelPack == null,
-            progress = modelDownloadProgress
-                .takeIf { activeModelPack == AssistantModelPackType.Voice },
-            primaryAction = when {
-                !voiceModelInfo.installed -> "Install"
-                voiceModelInfo.hasUpdate(AssistantModelCatalog.voice) -> "Update"
-                else -> null
-            },
-            onPrimaryAction = onInstallVoiceModel,
-            secondaryAction = "Remove".takeIf { voiceModelInfo.installed },
-            onSecondaryAction = onRemoveVoiceModel,
         )
         AssistantSettingsSwitchRow(
             title = "Wi-Fi downloads only",
@@ -449,33 +533,72 @@ internal fun AssistantSettingsScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium,
         )
+        }
         Spacer(Modifier.height(32.dp))
     }
 }
 
 @Composable
+private fun VoiceTimingSlider(
+    label: String,
+    valueLabel: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    onChanged: (Float) -> Unit,
+) {
+    Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, modifier = Modifier.weight(1F), style = MaterialTheme.typography.bodyMedium)
+        Text(valueLabel, style = MaterialTheme.typography.bodyMedium)
+    }
+    Slider(value = value.coerceIn(range), onValueChange = onChanged, valueRange = range, steps = steps)
+}
+
+@Composable
 private fun AssistantCommandGuide() {
     Text(
-        "Use Add, Increase, Boost, Reduce, Lower, or Remove followed by a target.",
+        "Supported language: English. These standard commands work without the LLM. Use Add, Increase, Boost, Reduce, or Lower followed by a target.",
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         style = MaterialTheme.typography.bodyMedium,
     )
     AssistantCommandExamples(
         title = "Sound",
-        examples = "Add bass\nReduce mids\nIncrease treble\nClearer vocals\nAdd echo",
+        examples = "Add bass\nReduce bass\nIncrease mids\nLower treble\nClearer vocals\nMore detail\nWider stage\nAdd echo\nReduce reverb",
     )
     AssistantCommandExamples(
+        title = "Combined changes",
+        examples = "Increase bass and treble\nIncrease bass and lower treble\nAdd bass and turn on reverb",
+    )
+    Text("Small, bounded steps. If any part of a combined standard command is unclear, nothing is applied.",
+        modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant)
+    AssistantCommandExamples(
         title = "Effects",
-        examples = "Turn on equalizer\nTurn off bass foundation\nTurn on immersive field\nTurn on reverb",
+        examples = "Turn on equalizer\nTurn off bass foundation\nTurn on detail recovery\nTurn on immersive field\nTurn on reverb\nTurn off output protection",
     )
     AssistantCommandExamples(
         title = "Profiles and history",
-        examples = "Switch profile to <profile name>\nUndo",
+        examples = "Switch profile to <saved profile name>\nLoad profile <saved profile name>\nUndo",
     )
+    Text("Profiles must already exist; use the exact saved name. English names are recommended for voice commands. Profile changes require review. Undo restores the last assistant change; Cancel only ends the current request.",
+        modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant)
     AssistantCommandExamples(
-        title = "Bulgarian examples",
-        examples = "Добави бас\nНамали средите\nУвеличи високите\nДобави ехо\nВключи реверберацията",
+        title = "Help and cancellation",
+        examples = "Cancel\nStop listening\nNever mind\nWhat can you do?\nHelp\nBass help\nEqualizer help\nProfiles help\nEffects help\nReverb help\nImmersive field help\nDetail recovery help\nUndo help",
     )
+    Text("Volume-button sessions ask for Yes or No before changing settings. After help, they briefly wait for another command. Press the configured volume button again to interrupt listening or a spoken reply.",
+        modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant)
+    AssistantCommandExamples(title = "Experimental conversational tuning",
+        examples = "Bring the vocals forward, but keep the bass unchanged\nMore detail without more brightness\nUndo half of the last bass change")
+    Text("These descriptive requests require the optional language model and Conversational tuning under Experimental features. Model proposals always require review. Half-undo requires an unchanged snapshot of the last assistant sound change.",
+        modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text("Not supported: other languages, radio or music-player controls, creating profiles by voice, automatic headphone calibration, or guaranteed distortion removal.",
+        modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant)
     Text(
         "Commands are case-insensitive. Reverb and echo refer to the same effect.",
         modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),

@@ -8,6 +8,7 @@ internal enum class ThemePreference(val label: String) {
     Dark("Dark"),
 }
 
+// Legacy values are retained internally but are no longer offered in settings.
 internal enum class AssistantLanguage(val label: String) {
     Automatic("Automatic"),
     English("English"),
@@ -41,7 +42,12 @@ internal enum class AssistantKeepWarm(val label: String) {
 
 internal enum class AssistantVoiceMode(val label: String) {
     PushToTalk("Push to talk"),
-    WakePhrase("Wake phrase"),
+    VolumeButton("Volume button"),
+}
+
+internal enum class AssistantVolumeButton(val label: String, val keyCode: Int) {
+    Up("Volume Up", 24),
+    Down("Volume Down", 25),
 }
 
 internal data class AppPreferences(
@@ -49,15 +55,22 @@ internal data class AppPreferences(
     val automaticDeviceProfiles: Boolean = false,
     val showDeviceInNotification: Boolean = true,
     val assistantEnabled: Boolean = false,
-    val assistantLanguage: AssistantLanguage = AssistantLanguage.Automatic,
+    val assistantConversationalTuning: Boolean = false,
+    val assistantLanguage: AssistantLanguage = AssistantLanguage.English,
     val assistantApplyMode: AssistantApplyMode = AssistantApplyMode.Preview,
     val assistantAdjustmentStrength: AssistantAdjustmentStrength =
         AssistantAdjustmentStrength.Conservative,
     val assistantVoiceEnabled: Boolean = false,
     val assistantVoiceMode: AssistantVoiceMode = AssistantVoiceMode.PushToTalk,
+    val assistantVolumeButton: AssistantVolumeButton = AssistantVolumeButton.Up,
+    val assistantButtonHoldMilliseconds: Int = 1000,
+    val assistantSilenceMilliseconds: Int = 1000,
+    val assistantSpeechWaitSeconds: Int = 8,
+    val assistantConfirmationWaitSeconds: Int = 8,
     val assistantAutoSubmitVoice: Boolean = false,
     val assistantPauseMediaForVoice: Boolean = true,
     val assistantSpeakVoiceConfirmation: Boolean = true,
+    val assistantEnglishSpeechVoice: String = "",
     val assistantAskForFeedback: Boolean = true,
     val assistantKeepWarm: AssistantKeepWarm = AssistantKeepWarm.KeepReady,
     val assistantWifiOnlyDownloads: Boolean = true,
@@ -85,6 +98,11 @@ internal object AppPreferencesStore {
 
     fun load(context: Context): AppPreferences {
         val preferences = context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
+        if (preferences.getString(KeyAssistantLanguage, null) != AssistantLanguage.English.name ||
+            preferences.contains("assistant_bulgarian_speech_voice")) {
+            preferences.edit().putString(KeyAssistantLanguage, AssistantLanguage.English.name)
+                .remove("assistant_bulgarian_speech_voice").apply()
+        }
         val theme = runCatching {
             ThemePreference.valueOf(
                 preferences.getString(KeyTheme, ThemePreference.System.name).orEmpty(),
@@ -96,10 +114,8 @@ internal object AppPreferencesStore {
             showDeviceInNotification =
                 preferences.getBoolean(KeyShowDeviceInNotification, true),
             assistantEnabled = preferences.getBoolean(KeyAssistantEnabled, false),
-            assistantLanguage = preferences.enumValue(
-                KeyAssistantLanguage,
-                AssistantLanguage.Automatic,
-            ),
+            assistantConversationalTuning = preferences.getBoolean("assistant_conversational_tuning", false),
+            assistantLanguage = AssistantLanguage.English,
             assistantApplyMode = preferences.enumValue(
                 KeyAssistantApplyMode,
                 AssistantApplyMode.Preview,
@@ -113,12 +129,22 @@ internal object AppPreferencesStore {
                 KeyAssistantVoiceMode,
                 AssistantVoiceMode.PushToTalk,
             ),
+            assistantVolumeButton = preferences.enumValue("assistant_volume_button", AssistantVolumeButton.Up),
+            assistantButtonHoldMilliseconds = preferences.getInt("assistant_button_hold_ms", 1000)
+                .coerceIn(500, 3000),
+            assistantSilenceMilliseconds = preferences.getInt("assistant_silence_ms", 1000)
+                .coerceIn(500, 3000),
+            assistantSpeechWaitSeconds = preferences.getInt("assistant_speech_wait_seconds", 8)
+                .coerceIn(3, 15),
+            assistantConfirmationWaitSeconds = preferences.getInt("assistant_confirm_wait_seconds", 8)
+                .coerceIn(3, 15),
             assistantAutoSubmitVoice =
                 preferences.getBoolean(KeyAssistantAutoSubmitVoice, false),
             assistantPauseMediaForVoice =
                 preferences.getBoolean(KeyAssistantPauseMediaForVoice, true),
             assistantSpeakVoiceConfirmation =
                 preferences.getBoolean(KeyAssistantSpeakVoiceConfirmation, true),
+            assistantEnglishSpeechVoice = preferences.getString("assistant_english_speech_voice", "").orEmpty(),
             assistantAskForFeedback = preferences.getBoolean(KeyAssistantAskForFeedback, true),
             assistantKeepWarm = preferences.enumValue(
                 KeyAssistantKeepWarm,
@@ -136,7 +162,8 @@ internal object AppPreferencesStore {
             .putBoolean(KeyAutomaticDeviceProfiles, preferences.automaticDeviceProfiles)
             .putBoolean(KeyShowDeviceInNotification, preferences.showDeviceInNotification)
             .putBoolean(KeyAssistantEnabled, preferences.assistantEnabled)
-            .putString(KeyAssistantLanguage, preferences.assistantLanguage.name)
+            .putBoolean("assistant_conversational_tuning", preferences.assistantConversationalTuning)
+            .putString(KeyAssistantLanguage, AssistantLanguage.English.name)
             .putString(KeyAssistantApplyMode, preferences.assistantApplyMode.name)
             .putString(
                 KeyAssistantAdjustmentStrength,
@@ -144,6 +171,12 @@ internal object AppPreferencesStore {
             )
             .putBoolean(KeyAssistantVoiceEnabled, preferences.assistantVoiceEnabled)
             .putString(KeyAssistantVoiceMode, preferences.assistantVoiceMode.name)
+            .remove("assistant_wake_phrase")
+            .putString("assistant_volume_button", preferences.assistantVolumeButton.name)
+            .putInt("assistant_button_hold_ms", preferences.assistantButtonHoldMilliseconds.coerceIn(500, 3000))
+            .putInt("assistant_silence_ms", preferences.assistantSilenceMilliseconds.coerceIn(500, 3000))
+            .putInt("assistant_speech_wait_seconds", preferences.assistantSpeechWaitSeconds.coerceIn(3, 15))
+            .putInt("assistant_confirm_wait_seconds", preferences.assistantConfirmationWaitSeconds.coerceIn(3, 15))
             .putBoolean(KeyAssistantAutoSubmitVoice, preferences.assistantAutoSubmitVoice)
             .putBoolean(
                 KeyAssistantPauseMediaForVoice,
@@ -154,6 +187,8 @@ internal object AppPreferencesStore {
                 preferences.assistantSpeakVoiceConfirmation,
             )
             .putBoolean(KeyAssistantAskForFeedback, preferences.assistantAskForFeedback)
+            .putString("assistant_english_speech_voice", preferences.assistantEnglishSpeechVoice)
+            .remove("assistant_bulgarian_speech_voice")
             .putString(KeyAssistantKeepWarm, preferences.assistantKeepWarm.name)
             .putBoolean(
                 KeyAssistantWifiOnlyDownloads,

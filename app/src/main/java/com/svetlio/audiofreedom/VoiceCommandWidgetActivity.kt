@@ -64,6 +64,7 @@ private enum class WidgetVoicePhase {
     Interpreting,
     Review,
     Applied,
+    Information,
     Error,
 }
 
@@ -152,6 +153,7 @@ class VoiceCommandWidgetActivity : ComponentActivity() {
         phase = WidgetVoicePhase.Listening
         headline = "Listening"
         detail = "Speak now. Tap the circle to stop."
+        audioSession.beginManualSession()
         if (preferences.assistantPauseMediaForVoice) {
             audioSession.requestPlaybackPause()
         }
@@ -161,7 +163,9 @@ class VoiceCommandWidgetActivity : ComponentActivity() {
                     val recording = withContext(Dispatchers.IO) {
                         recorder.record(
                             autoStopAfterSilence = true,
-                            maximumSeconds = 12,
+                            maximumSeconds = 20,
+                            silenceMilliseconds = preferences.assistantSilenceMilliseconds,
+                            waitForSpeechSeconds = preferences.assistantSpeechWaitSeconds,
                             onLevel = { level -> runOnUiThread { microphoneLevel = level } },
                         )
                     }
@@ -192,26 +196,34 @@ class VoiceCommandWidgetActivity : ComponentActivity() {
         detail = "Speech stays on this phone"
         val settings = AudioFreedomSettingsStore.load(this)
         val profiles = AudioFreedomProfileStore.list(this)
-        val primary = AssistantVoiceRuntimeManager.transcribe(
+        val transcript = AssistantVoiceRuntimeManager.transcribe(
             samples,
-            preferences.assistantLanguage,
+            AssistantLanguage.English,
         )
-        val transcript = if (
-            preferences.assistantLanguage == AssistantLanguage.Automatic &&
-            !isSupportedAssistantCommand(primary, settings, profiles, preferences)
-        ) {
-            val bulgarian = AssistantVoiceRuntimeManager.transcribe(
-                samples,
-                AssistantLanguage.Bulgarian,
-            )
-            chooseAutomaticVoiceTranscript(primary, bulgarian) { candidate ->
-                isSupportedAssistantCommand(candidate, settings, profiles, preferences)
-            }
-        } else {
-            primary
-        }
         if (transcript.isBlank()) {
             showError("No speech was recognized")
+            return
+        }
+
+        val control = AssistantConversationCommands.recognize(transcript)
+        if (control != null) {
+            val language = HandsFreeVoicePolicy.replyLanguage(preferences.assistantLanguage, transcript)
+            pendingProposal = null
+            headline = if (control == AssistantConversationControl.Cancel) "Command cancelled" else "Assistant help"
+            detail = AssistantConversationCommands.response(control, language)
+            phase = WidgetVoicePhase.Information
+            try {
+                if (preferences.assistantSpeakVoiceConfirmation) {
+                    when (audioSession.speak(detail.orEmpty(), language, 30_000L)) {
+                        SpokenConfirmationResult.NoSpeechEngine -> detail += " No Android text-to-speech engine is installed or enabled."
+                        SpokenConfirmationResult.NoOfflineVoice -> detail += " No offline ${language.label} speech voice is installed."
+                        SpokenConfirmationResult.Failed -> detail += " Android could not play the spoken reply."
+                        SpokenConfirmationResult.Spoken -> Unit
+                    }
+                }
+            } finally {
+                audioSession.restorePlayback()
+            }
             return
         }
 
@@ -247,6 +259,7 @@ class VoiceCommandWidgetActivity : ComponentActivity() {
         pendingProposal = proposal
         headline = proposal.title
         detail = proposal.explanation
+        var speechWarning: String? = null
         if (preferences.assistantSpeakVoiceConfirmation) {
             when (
                 audioSession.speakPlannedChange(
@@ -255,10 +268,12 @@ class VoiceCommandWidgetActivity : ComponentActivity() {
                 )
             ) {
                 SpokenConfirmationResult.Spoken -> Unit
+                SpokenConfirmationResult.NoSpeechEngine ->
+                    speechWarning = "No Android text-to-speech engine is installed or enabled. Open Local assistant > Spoken replies."
                 SpokenConfirmationResult.NoOfflineVoice ->
-                    detail = "${proposal.explanation} No offline system voice is installed."
+                    speechWarning = "No offline speech voice is installed for this reply. Open Local assistant > Spoken replies."
                 SpokenConfirmationResult.Failed ->
-                    detail = "${proposal.explanation} Spoken confirmation failed."
+                    speechWarning = "Android could not play the spoken confirmation. Check Android speech settings."
             }
         }
         if (applyAutomatically) {
@@ -267,6 +282,7 @@ class VoiceCommandWidgetActivity : ComponentActivity() {
             phase = WidgetVoicePhase.Review
             audioSession.restorePlayback()
         }
+        speechWarning?.let { detail = "${detail.orEmpty()} $it" }
     }
 
     private fun applyProposal(proposal: AssistantProposal) {
@@ -275,7 +291,7 @@ class VoiceCommandWidgetActivity : ComponentActivity() {
             return
         }
         pendingProposal = null
-        AssistantUndoStore.save(this, proposal.baseSettings)
+        AssistantUndoStore.save(this, proposal.baseSettings, proposal.settings)
         AudioFreedomService.updateSettings(this, proposal.settings)
         phase = WidgetVoicePhase.Applied
         headline = proposal.title
@@ -295,19 +311,27 @@ class VoiceCommandWidgetActivity : ComponentActivity() {
             return
         }
         activityScope.launch {
-            if (speakConfirmation) {
+            val spokenResult = if (speakConfirmation) {
                 audioSession.speakPlannedChange(
                     change = "Restore previous settings",
                     applying = true,
                 )
-            }
+            } else null
             AudioFreedomService.updateSettings(this@VoiceCommandWidgetActivity, previous)
             AssistantUndoStore.clear(this@VoiceCommandWidgetActivity)
             pendingProposal = null
             undoAvailable = false
             phase = WidgetVoicePhase.Applied
             headline = "Last change undone"
-            detail = "Previous settings restored"
+            detail = when (spokenResult) {
+                SpokenConfirmationResult.NoSpeechEngine ->
+                    "Previous settings restored. No Android text-to-speech engine is installed or enabled. Open Local assistant > Spoken replies."
+                SpokenConfirmationResult.NoOfflineVoice ->
+                    "Previous settings restored. No offline speech voice is installed for this reply. Open Local assistant > Spoken replies."
+                SpokenConfirmationResult.Failed ->
+                    "Previous settings restored, but Android could not play the spoken confirmation."
+                else -> "Previous settings restored"
+            }
             audioSession.restorePlayback()
         }
     }
@@ -396,7 +420,7 @@ private fun VoiceCommandWidgetPanel(
                     }
                     TextButton(onClick = onClose) { Text("Done") }
                 }
-                WidgetVoicePhase.Error ->
+                WidgetVoicePhase.Error, WidgetVoicePhase.Information ->
                     TextButton(
                         onClick = onClose,
                         modifier = Modifier.padding(top = 10.dp),

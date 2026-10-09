@@ -8,10 +8,11 @@ internal object AssistantUndoStore {
     private const val Preferences = "audiofreedom_assistant_undo"
     private const val KeySnapshot = "settings_snapshot"
 
-    fun save(context: Context, settings: AudioFreedomSettings) {
+    fun save(context: Context, settings: AudioFreedomSettings, applied: AudioFreedomSettings? = null) {
         context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
             .edit()
             .putString(KeySnapshot, settings.toJson().toString())
+            .putString("applied_snapshot", applied?.toJson()?.toString())
             .apply()
     }
 
@@ -26,7 +27,15 @@ internal object AssistantUndoStore {
         context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
             .edit()
             .remove(KeySnapshot)
+            .remove("applied_snapshot")
             .apply()
+    }
+
+    fun conversationalBaseline(context: Context, current: AudioFreedomSettings): AudioFreedomSettings? {
+        val raw = context.getSharedPreferences(Preferences, Context.MODE_PRIVATE).getString("applied_snapshot", null)
+            ?: return null
+        val applied = runCatching { JSONObject(raw).toAudioFreedomSettings() }.getOrNull()
+        return if (applied == current) load(context) else null
     }
 
     private fun AudioFreedomSettings.toJson() = JSONObject()

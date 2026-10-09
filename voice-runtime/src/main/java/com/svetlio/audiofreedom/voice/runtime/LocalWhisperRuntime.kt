@@ -20,12 +20,12 @@ class LocalWhisperRuntime {
         }
     }
 
-    suspend fun transcribe(pcm16: ShortArray, language: String): String {
+    suspend fun transcribe(pcm16: ShortArray, language: String, commandHints: Boolean = true): String {
         require(pcm16.isNotEmpty()) { "Recording is empty" }
         return mutex.withLock {
             check(isModelLoaded) { "No Whisper model is loaded" }
             withContext(Dispatchers.Default) {
-                nativeTranscribe(pcm16, language).trim()
+                nativeTranscribe(pcm16, language, commandHints).trim()
             }
         }
     }
@@ -38,7 +38,7 @@ class LocalWhisperRuntime {
     }
 
     private external fun nativeLoadModel(path: String)
-    private external fun nativeTranscribe(pcm16: ShortArray, language: String): String
+    private external fun nativeTranscribe(pcm16: ShortArray, language: String, commandHints: Boolean): String
     private external fun nativeUnload()
 
     private companion object {

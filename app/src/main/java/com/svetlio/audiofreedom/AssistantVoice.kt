@@ -9,17 +9,20 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.NoiseSuppressor
+import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import androidx.core.content.ContextCompat
 import com.svetlio.audiofreedom.voice.runtime.LocalWhisperRuntime
+import com.svetlio.audiofreedom.voice.runtime.LocalVoiceActivityDetector
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.sqrt
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.sync.Mutex
@@ -40,22 +43,57 @@ internal sealed interface VoiceRecordingResult {
 
 internal enum class SpokenConfirmationResult {
     Spoken,
+    NoSpeechEngine,
     NoOfflineVoice,
     Failed,
 }
 
+internal object VoiceCaptureOwnership {
+    val manualSessions = AtomicInteger(0)
+    val microphoneLock = Any()
+}
+
 internal class VoiceCommandRecorder(private val context: Context) {
-    private val stopRequested = AtomicBoolean(false)
+    private val stopGeneration = AtomicInteger(0)
+    @Volatile var lastCaptureDetail: String = ""
+        private set
 
     fun stop() {
-        stopRequested.set(true)
+        stopGeneration.incrementAndGet()
     }
 
     fun record(
         autoStopAfterSilence: Boolean = false,
         maximumSeconds: Int = MaximumSeconds,
+        silenceMilliseconds: Int = 1000,
+        waitForSpeechSeconds: Int = 8,
+        handsFreeSession: Boolean = false,
         onLevel: (Float) -> Unit = {},
     ): VoiceRecordingResult {
+        val generation = stopGeneration.get()
+        if (!handsFreeSession) {
+            VoiceCaptureOwnership.manualSessions.incrementAndGet()
+            AssistantHandsFreeService.interruptConversation()
+        }
+        try {
+            return synchronized(VoiceCaptureOwnership.microphoneLock) {
+                capture(autoStopAfterSilence, maximumSeconds, silenceMilliseconds,
+                    waitForSpeechSeconds, generation, onLevel)
+            }
+        } finally {
+            if (!handsFreeSession) VoiceCaptureOwnership.manualSessions.decrementAndGet()
+        }
+    }
+
+    private fun capture(
+        autoStopAfterSilence: Boolean,
+        maximumSeconds: Int,
+        silenceMilliseconds: Int,
+        waitForSpeechSeconds: Int,
+        generation: Int,
+        onLevel: (Float) -> Unit,
+    ): VoiceRecordingResult {
+        lastCaptureDetail = ""
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) !=
             PackageManager.PERMISSION_GRANTED
         ) {
@@ -69,29 +107,40 @@ internal class VoiceCommandRecorder(private val context: Context) {
             AudioFormat.ENCODING_PCM_16BIT,
         )
         check(minimumBuffer > 0) { "Microphone recording is unavailable" }
-        val bufferSamples = maxOf(minimumBuffer / 2, 2048)
+        val bufferSamples = 512
         val recorder = AudioRecord(
             MediaRecorder.AudioSource.VOICE_RECOGNITION,
             SampleRate,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
-            bufferSamples * 2,
+            maxOf(minimumBuffer, bufferSamples * 2),
         )
         check(recorder.state == AudioRecord.STATE_INITIALIZED) {
             recorder.release()
             "Microphone recording could not be initialized"
         }
 
-        stopRequested.set(false)
         val bytes = ByteArrayOutputStream()
         val buffer = ShortArray(bufferSamples)
         var callInterrupted = false
-        var speechDetected = false
-        var silentSamples = 0
+        val endpoint = VoiceEndpointDetector(silenceMilliseconds)
         val maximumBytes = SampleRate * maximumSeconds.coerceIn(1, MaximumSeconds) * 2
+        var totalSamples = 0L
+        var maximumLevel = 0F
+        var maximumProbability = 0F
+        val noiseSuppressor = if (NoiseSuppressor.isAvailable()) {
+            runCatching { NoiseSuppressor.create(recorder.audioSessionId)?.apply { enabled = true } }
+                .getOrNull()
+        } else null
+        var detector: LocalVoiceActivityDetector? = null
         try {
+            if (autoStopAfterSilence) {
+                detector = LocalVoiceActivityDetector(BundledSpeechDetector.path(context))
+            }
+            if (generation != stopGeneration.get()) return VoiceRecordingResult.TooShort
             recorder.startRecording()
-            while (!stopRequested.get() && bytes.size() < maximumBytes) {
+            val startedAt = SystemClock.elapsedRealtime()
+            while (generation == stopGeneration.get() && bytes.size() < maximumBytes) {
                 if (isCallActive()) {
                     callInterrupted = true
                     break
@@ -104,33 +153,43 @@ internal class VoiceCommandRecorder(private val context: Context) {
                     squareSum += normalized * normalized
                 }
                 val level = if (count == 0) 0F else sqrt(squareSum / count).toFloat()
+                totalSamples += count
+                maximumLevel = maxOf(maximumLevel, level)
                 onLevel((level / VoiceLevelReference).coerceIn(0F, 1F))
-                if (autoStopAfterSilence) {
-                    if (level >= SpeechStartLevel) {
-                        speechDetected = true
-                        silentSamples = 0
-                    } else if (speechDetected && level <= SpeechStopLevel) {
-                        silentSamples += count
-                    } else if (speechDetected) {
-                        silentSamples = 0
-                    }
-                }
+                val ended = count > 0 && detector?.let {
+                    val probability = it.probability(buffer, count)
+                    check(probability.isFinite()) { "Speech detector returned an invalid probability" }
+                    maximumProbability = maxOf(maximumProbability, probability)
+                    endpoint.accept(probability, count)
+                } == true
                 val chunk = ByteBuffer.allocate(count * 2).order(ByteOrder.LITTLE_ENDIAN)
                 for (index in 0 until count) chunk.putShort(buffer[index])
                 bytes.write(chunk.array())
-                if (
-                    autoStopAfterSilence && speechDetected &&
-                    silentSamples >= SampleRate * SilenceAfterSpeechMilliseconds / 1000
-                ) {
-                    break
+                if (ended) break
+                // Keep a short lead-in, rather than feed long waiting silence to Whisper.
+                if (autoStopAfterSilence && !endpoint.hasSpeech && bytes.size() > SampleRate) {
+                    val raw = bytes.toByteArray()
+                    val leadIn = raw.copyOfRange(raw.size - SampleRate, raw.size)
+                    bytes.reset()
+                    bytes.write(leadIn)
                 }
+                if (autoStopAfterSilence && !endpoint.hasSpeech &&
+                    SystemClock.elapsedRealtime() - startedAt >= waitForSpeechSeconds * 1000L) break
+                if (SystemClock.elapsedRealtime() - startedAt >= maximumSeconds * 1000L) break
             }
         } finally {
+            lastCaptureDetail = String.format(Locale.ROOT,
+                "Captured %.1f s | microphone peak %.4f | speech confidence %.2f | %s",
+                totalSamples / SampleRate.toDouble(), maximumLevel, maximumProbability,
+                if (endpoint.hasSpeech) "speech detected" else "no speech detected")
             onLevel(0F)
             runCatching { recorder.stop() }
+            detector?.close()
+            noiseSuppressor?.release()
             recorder.release()
         }
         if (callInterrupted) return VoiceRecordingResult.CallActive
+        if (autoStopAfterSilence && !endpoint.hasSpeech) return VoiceRecordingResult.TooShort
 
         val raw = bytes.toByteArray()
         if (raw.size < MinimumBytes) return VoiceRecordingResult.TooShort
@@ -152,14 +211,11 @@ internal class VoiceCommandRecorder(private val context: Context) {
         const val MaximumSeconds = 20
         const val MinimumMilliseconds = 350
         const val MinimumBytes = SampleRate * MinimumMilliseconds / 1000 * 2
-        const val SilenceAfterSpeechMilliseconds = 1_100
-        const val SpeechStartLevel = 0.025F
-        const val SpeechStopLevel = 0.015F
         const val VoiceLevelReference = 0.12F
     }
 }
 
-internal class VoiceCommandAudioSession(context: Context) {
+internal class VoiceCommandAudioSession(private val context: Context, private val handsFree: Boolean = false) {
     private val audioManager = context.getSystemService(AudioManager::class.java)
     private val focusRequest = AudioFocusRequest.Builder(
         AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE,
@@ -173,74 +229,96 @@ internal class VoiceCommandAudioSession(context: Context) {
         .setWillPauseWhenDucked(true)
         .setOnAudioFocusChangeListener { }
         .build()
-    private val speechReady = CompletableDeferred<Boolean>()
+    private var speechReady = CompletableDeferred<Boolean>()
     private val pendingSpeech = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
-    private val textToSpeech = TextToSpeech(context.applicationContext) { status ->
-        speechReady.complete(status == TextToSpeech.SUCCESS)
-    }.apply {
-        setOnUtteranceProgressListener(
-            object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) = Unit
+    private var enginePackage: String? = null
+    private var textToSpeech = createSpeechEngine()
 
-                override fun onDone(utteranceId: String?) {
-                    utteranceId?.let { pendingSpeech.remove(it)?.complete(true) }
-                }
+    private fun createSpeechEngine(): TextToSpeech {
+        val ready = CompletableDeferred<Boolean>()
+        speechReady = ready
+        return TextToSpeech(context.applicationContext) { status ->
+            ready.complete(status == TextToSpeech.SUCCESS)
+        }.apply {
+            setOnUtteranceProgressListener(
+                object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) = Unit
 
-                @Deprecated("Deprecated by Android")
-                override fun onError(utteranceId: String?) {
-                    utteranceId?.let { pendingSpeech.remove(it)?.complete(false) }
-                }
+                    override fun onDone(utteranceId: String?) {
+                        utteranceId?.let { pendingSpeech.remove(it)?.complete(true) }
+                    }
 
-                override fun onError(utteranceId: String?, errorCode: Int) {
-                    onError(utteranceId)
-                }
-            },
-        )
+                    @Deprecated("Deprecated by Android")
+                    override fun onError(utteranceId: String?) {
+                        utteranceId?.let { pendingSpeech.remove(it)?.complete(false) }
+                    }
+
+                    override fun onError(utteranceId: String?, errorCode: Int) {
+                        onError(utteranceId)
+                    }
+                },
+            )
+        }
     }
     private var holdsAudioFocus = false
+    private var manualSession = false
 
+    @Synchronized
+    fun beginManualSession() {
+        if (!handsFree && !manualSession) {
+            manualSession = true
+            VoiceCaptureOwnership.manualSessions.incrementAndGet()
+            AssistantHandsFreeService.interruptConversation()
+        }
+    }
+
+    @Synchronized
     fun requestPlaybackPause(): Boolean {
+        beginManualSession()
         if (holdsAudioFocus) return true
         holdsAudioFocus =
             audioManager.requestAudioFocus(focusRequest) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         return holdsAudioFocus
     }
 
+    @Synchronized
     fun restorePlayback() {
-        if (!holdsAudioFocus) return
-        audioManager.abandonAudioFocusRequest(focusRequest)
-        holdsAudioFocus = false
+        if (holdsAudioFocus) {
+            audioManager.abandonAudioFocusRequest(focusRequest)
+            holdsAudioFocus = false
+        }
+        if (manualSession) {
+            manualSession = false
+            VoiceCaptureOwnership.manualSessions.decrementAndGet()
+        }
     }
 
     suspend fun speakPlannedChange(
         change: String,
         applying: Boolean,
     ): SpokenConfirmationResult {
-        val initialized = withTimeoutOrNull(SpeechInitializationTimeoutMilliseconds) {
-            speechReady.await()
-        } ?: false
-        if (!initialized) return SpokenConfirmationResult.Failed
-        val requestedLocale = if (change.any { it in '\u0400'..'\u04ff' }) {
-            bulgarianLocale()
-        } else {
-            Locale.ENGLISH
-        }
-        val offlineVoice = textToSpeech.voices
-            ?.filterNot { it.isNetworkConnectionRequired }
-            ?.firstOrNull { it.locale.language == requestedLocale.language }
+        val prefix = if (applying) "Applying" else "Understood"
+        return speak("$prefix: $change", AssistantLanguage.English)
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    suspend fun speak(text: String, language: AssistantLanguage,
+        maximumSpeechMilliseconds: Long = SpokenConfirmationTimeoutMilliseconds): SpokenConfirmationResult {
+        if (!hasInstalledSpeechEngine(context)) return SpokenConfirmationResult.NoSpeechEngine
+        val voices = availableSpeechVoices() ?: return SpokenConfirmationResult.Failed
+        val requestedLocale = Locale.ENGLISH
+        val preferences = AppPreferencesStore.load(context)
+        val preferred = preferences.assistantEnglishSpeechVoice
+        val selected = OfflineSpeechVoicePolicy.choose(voices, requestedLocale.language, requestedLocale.country, preferred)
             ?: return SpokenConfirmationResult.NoOfflineVoice
-        textToSpeech.voice = offlineVoice
-        val prefix = when {
-            requestedLocale.language == "bg" && applying -> "Прилагам"
-            requestedLocale.language == "bg" -> "Разбрах"
-            applying -> "Applying"
-            else -> "Understood"
-        }
+        val offlineVoice = textToSpeech.voices?.firstOrNull { it.name == selected.name }
+            ?: return SpokenConfirmationResult.NoOfflineVoice
+        if (textToSpeech.setVoice(offlineVoice) != TextToSpeech.SUCCESS) return SpokenConfirmationResult.Failed
         val utteranceId = UUID.randomUUID().toString()
         val completion = CompletableDeferred<Boolean>()
         pendingSpeech[utteranceId] = completion
         val result = textToSpeech.speak(
-            "$prefix: $change",
+            text,
             TextToSpeech.QUEUE_FLUSH,
             null,
             utteranceId,
@@ -249,9 +327,11 @@ internal class VoiceCommandAudioSession(context: Context) {
             pendingSpeech.remove(utteranceId)
             return SpokenConfirmationResult.Failed
         }
-        val completed = withTimeoutOrNull(SpokenConfirmationTimeoutMilliseconds) {
+        val completed = withTimeoutOrNull(maximumSpeechMilliseconds.coerceIn(1000L, 30_000L)) {
             completion.await()
         } ?: false
+        pendingSpeech.remove(utteranceId)
+        if (!completed) textToSpeech.stop()
         return if (completed) {
             SpokenConfirmationResult.Spoken
         } else {
@@ -259,22 +339,40 @@ internal class VoiceCommandAudioSession(context: Context) {
         }
     }
 
+    suspend fun availableSpeechVoices(): List<OfflineSpeechVoice>? {
+        // A return from Android speech settings can change the default engine.
+        if (enginePackage != null && enginePackage != textToSpeech.defaultEngine) {
+            stopSpeaking()
+            textToSpeech.shutdown()
+            textToSpeech = createSpeechEngine()
+            enginePackage = null
+        }
+        val initialized = withTimeoutOrNull(SpeechInitializationTimeoutMilliseconds) { speechReady.await() } ?: false
+        if (!initialized) return null
+        enginePackage = textToSpeech.defaultEngine
+        return textToSpeech.voices.orEmpty().map { voice ->
+            OfflineSpeechVoice("$enginePackage:${voice.name}", voice.name, voice.locale.language,
+                voice.locale.country, voice.quality, voice.latency, voice.isNetworkConnectionRequired,
+                TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED !in voice.features.orEmpty())
+        }
+    }
+
     fun shutdown() {
+        stopSpeaking()
+        textToSpeech.shutdown()
+        restorePlayback()
+    }
+
+    fun stopSpeaking() {
         pendingSpeech.values.forEach { it.complete(false) }
         pendingSpeech.clear()
         textToSpeech.stop()
-        textToSpeech.shutdown()
-        restorePlayback()
     }
 
     private companion object {
         const val SpokenConfirmationTimeoutMilliseconds = 15_000L
         const val SpeechInitializationTimeoutMilliseconds = 5_000L
 
-        fun bulgarianLocale(): Locale = Locale.Builder()
-            .setLanguage("bg")
-            .setRegion("BG")
-            .build()
     }
 }
 
@@ -283,7 +381,12 @@ internal object AssistantVoiceRuntimeManager {
     private var runtime: LocalWhisperRuntime? = null
     private var loadedPath: String? = null
 
-    suspend fun transcribe(samples: ShortArray, language: AssistantLanguage): String =
+    @Suppress("UNUSED_PARAMETER")
+    suspend fun transcribe(
+        samples: ShortArray,
+        language: AssistantLanguage,
+        commandHints: Boolean = true,
+    ): String =
         mutex.withLock {
             val modelPath = AssistantRuntimeManager.voiceModelPath()
                 ?: error("Install the voice language pack first")
@@ -294,11 +397,8 @@ internal object AssistantVoiceRuntimeManager {
             }
             active.transcribe(
                 samples,
-                when (language) {
-                    AssistantLanguage.Automatic -> "auto"
-                    AssistantLanguage.English -> "en"
-                    AssistantLanguage.Bulgarian -> "bg"
-                },
+                "en",
+                commandHints,
             )
         }
 }
@@ -319,7 +419,7 @@ internal fun isSupportedAssistantCommand(
     current: AudioFreedomSettings,
     profiles: List<AudioFreedomProfile>,
     preferences: AppPreferences,
-): Boolean = AssistantCommandPlanner.plan(
+): Boolean = AssistantConversationCommands.recognize(command) != null || AssistantCommandPlanner.plan(
     command = command,
     current = current,
     profiles = profiles,

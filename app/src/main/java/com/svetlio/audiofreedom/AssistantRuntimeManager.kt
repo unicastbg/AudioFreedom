@@ -61,7 +61,7 @@ internal object AssistantModelCatalog {
         type = AssistantModelPackType.Voice,
         id = "whisper-tiny-multilingual",
         version = "tiny-r1",
-        displayName = "Whisper Tiny multilingual",
+        displayName = "Whisper Tiny (English commands)",
         fileName = "voice-model.bin",
         downloadUrl =
             "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/" +
@@ -250,8 +250,10 @@ internal object AssistantModelPackStore {
     }
 
     fun remove(context: Context, pack: AssistantModelPack) {
-        packFile(context, pack).delete()
-        temporaryFile(context, pack).delete()
+        val model = packFile(context, pack)
+        val temporary = temporaryFile(context, pack)
+        check(!model.exists() || model.delete()) { "Could not remove the installed model. Try again." }
+        check(!temporary.exists() || temporary.delete()) { "Could not remove the temporary model download. Try again." }
         clearMetadata(context, pack.type)
     }
 
@@ -443,10 +445,17 @@ internal object AssistantRuntimeManager : AssistantEngine {
             val context = checkNotNull(applicationContext) {
                 "Assistant runtime is not initialized"
             }
-            val deterministicResult = BuiltInAssistantEngine.plan(request)
+            val preferences = AppPreferencesStore.load(context)
+            val conversational = preferences.assistantEnabled && preferences.assistantConversationalTuning
+            val activeRequest = request.copy(previous = AssistantUndoStore.conversationalBaseline(context, request.current))
+            val requiresModel = AssistantTuningProtocol.needsConversation(request.command)
+            val deterministicResult = if (requiresModel) AssistantPlanResult.NotUnderstood(
+                "This request needs experimental conversational tuning. No partial changes were made.")
+                else BuiltInAssistantEngine.plan(request)
             if (deterministicResult !is AssistantPlanResult.NotUnderstood) {
                 return@withLock deterministicResult
             }
+            if (!conversational) return@withLock deterministicResult
             val modelPath = AssistantModelPackStore.languageModelPath(context)
                 ?: return@withLock deterministicResult
             unloadJob?.cancel()
@@ -457,18 +466,18 @@ internal object AssistantRuntimeManager : AssistantEngine {
             }
             try {
                 val output = activeRuntime.generate(
-                    systemPrompt = AssistantLlmProtocol.systemPrompt,
-                    userPrompt = AssistantLlmProtocol.userPrompt(
-                        request,
+                    systemPrompt = AssistantTuningProtocol.systemPrompt,
+                    userPrompt = AssistantTuningProtocol.userPrompt(
+                        activeRequest,
                         if (request.usePersonalization) {
                             AssistantFeedbackStore.recentExamples(context)
                         } else {
                             emptyList()
                         },
                     ),
-                    grammar = AssistantLlmProtocol.outputGrammar,
+                    grammar = AssistantTuningProtocol.grammar,
                 )
-                AssistantLlmProtocol.parse(output, request)
+                AssistantTuningProtocol.parse(output, activeRequest)
             } finally {
                 scheduleUnloadIfNeeded()
             }

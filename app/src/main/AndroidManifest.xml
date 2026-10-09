@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <queries>
@@ -37,6 +38,25 @@
             android:name=".AudioFreedomService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+        <service
+            android:name=".AssistantHandsFreeService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+        <activity
+            android:name=".VolumeVoiceActivationActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@style/Theme.AudioFreedom.VoiceOverlay" />
+        <service
+            android:name=".VolumeButtonAccessibilityService"
+            android:exported="true"
+            android:label="@string/volume_shortcut_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/volume_button_accessibility" />
+        </service>
         <receiver
             android:name=".AssistantVoiceWidgetProvider"
             android:enabled="true"

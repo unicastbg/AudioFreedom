@@ -56,9 +56,25 @@ Source: <https://github.com/ggml-org/whisper.cpp>
 
 License: [MIT License](LICENSES/MIT.txt)
 
+## Silero voice activity detector
+
+The APK bundles the 885,098-byte Silero v6.2.0 GGML speech-detector model from
+<https://huggingface.co/ggml-org/whisper-vad>, revision
+`9ffd54a1e1ee413ddf265af9913beaf518d1639b`.
+
+SHA-256: `2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987`.
+
+Copyright (c) 2020-present Silero Team. Licensed under the MIT License.
+
+Source: <https://github.com/snakers4/silero-vad>
+
+The full copyright and license notice is also bundled as `silero-vad-LICENSE.txt` in
+the APK assets.
+
 ## Optional model downloads
 
-AudioFreedom does not bundle model weights in the APK. When requested by the user, it can
+AudioFreedom does not bundle the language-model or Whisper recognition weights in the APK.
+When requested by the user, it can
 download a checksum-pinned Qwen3 0.6B GGUF model from ggml-org's conversion repository and
 the multilingual Whisper Tiny model from the whisper.cpp model repository.
 

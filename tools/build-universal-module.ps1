@@ -117,4 +117,7 @@ try {
     $archive.Dispose()
 }
 
+& (Join-Path $PSScriptRoot "sync-bundled-driver-module.ps1") -ModuleZip $zipPath |
+    Out-Null
+
 Write-Output $zipPath

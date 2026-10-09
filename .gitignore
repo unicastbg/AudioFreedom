@@ -17,4 +17,5 @@ module/build*/
 *.o
 *.obj
 *.zip
+!app/src/main/assets/audiofreedom-driver-module.zip
 *.iml

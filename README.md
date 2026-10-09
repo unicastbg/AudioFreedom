@@ -28,6 +28,9 @@ software effect chain.
 
 ## Features
 
+The latest milestone is **0.9.5-beta**. See the
+[release notes](docs/releases/0.9.5-beta.md) for changes since 0.9.4.
+
 - System-wide session-0 processing controlled by a foreground service
 - Ten-band constant-Q equalizer with preamp and persistent presets
 - Bass Foundation with deep-band lift, adaptive restraint, and small-driver support
@@ -40,9 +43,16 @@ software effect chain.
 - Phone speaker, wired, USB, HDMI, and Bluetooth route awareness in the app and notification
 - System, light, and dark themes
 - On-demand update checks against the latest public GitHub release
+- In-app installation, repair, and verified GitHub updates for the driver module
 - Optional on-device assistant with typed commands, offline Whisper push-to-talk,
   bounded DSP changes, private feedback, spoken confirmation, and persistent undo
+- English-only assistant commands and readback, with in-app standard-command help
+- Atomic combined commands and opt-in conversational tuning under Experimental features,
+  with an in-app examples/limits guide and locked-control preservation
 - Home-screen voice widget with a compact level-reactive command panel
+- Optional offline volume-button voice activation, spoken readback,
+  yes/no confirmation, adjustable pause timing, and call suspension
+- Short spoken help, cancellation, and volume-button interruption without changing sound
 - Automatic bypass outside Android's normal audio mode
 
 ## Compatibility
@@ -97,6 +107,10 @@ Open the repository in Android Studio, or build the debug APK from PowerShell:
 ```
 
 The app currently targets Android API 36 and has a minimum SDK of 35.
+
+The universal driver ZIP is bundled as an app asset for offline installation. After
+rebuilding the driver package, `tools/build-universal-module.ps1` synchronizes that asset
+and its SHA-256 metadata before the next APK build.
 
 ## Run native tests
 

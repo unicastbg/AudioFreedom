@@ -22,6 +22,7 @@ internal data class AssistantRequest(
     val profiles: List<AudioFreedomProfile>,
     val maximumBandDeltaMillibels: Int,
     val usePersonalization: Boolean = true,
+    val previous: AudioFreedomSettings? = null,
 )
 
 internal fun interface AssistantEngine {
@@ -40,6 +41,16 @@ internal object BuiltInAssistantEngine : AssistantEngine {
 
 internal object AssistantCommandPlanner {
     fun plan(
+        command: String,
+        current: AudioFreedomSettings,
+        profiles: List<AudioFreedomProfile>,
+        maximumBandDeltaMillibels: Int,
+    ): AssistantPlanResult {
+        AssistantCompoundCommands.plan(command, current, profiles, maximumBandDeltaMillibels)?.let { return it }
+        return planSingle(command, current, profiles, maximumBandDeltaMillibels)
+    }
+
+    internal fun planSingle(
         command: String,
         current: AudioFreedomSettings,
         profiles: List<AudioFreedomProfile>,
@@ -590,6 +601,8 @@ internal object AssistantCommandPlanner {
                 "crystalizer",
                 "crystallizer",
                 "възстановяване на детайла",
+                "детайлност",
+                "детайлността",
             ),
             currentlyEnabled = current.detailRecoveryEnabled,
             update = { settings, enabled -> settings.copy(detailRecoveryEnabled = enabled) },
@@ -602,6 +615,7 @@ internal object AssistantCommandPlanner {
                 "surround",
                 "spatial sound",
                 "обгръщащ звук",
+                "обгръщащия звук",
                 "пространствен звук",
             ),
             currentlyEnabled = current.immersiveFieldEnabled,
@@ -700,7 +714,7 @@ internal object AssistantCommandPlanner {
             }
     }
 
-    private fun describeChanges(
+    internal fun describeChanges(
         before: AudioFreedomSettings,
         after: AudioFreedomSettings,
     ): List<String> = buildList {

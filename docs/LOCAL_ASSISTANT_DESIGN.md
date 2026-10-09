@@ -2,6 +2,11 @@
 
 ## Boundaries
 
+The current user-facing assistant supports English only. Older Automatic/Bulgarian
+preferences are migrated to English. The existing multilingual Whisper model file is
+retained for installation compatibility but inference is explicitly forced to English.
+Other languages are not advertised as supported.
+
 The assistant runs in the companion app process. It is not part of the audio effect,
 controller daemon, or root module, and it never runs on the real-time audio thread.
 
@@ -92,12 +97,17 @@ than a managed pack.
   end-of-speech detection, interpretation review, Apply, and persistent one-step Undo.
 - Assistant changes save their previous DSP state in app-private storage. **Undo the last
   change** and the widget Undo button restore the same snapshot across app launches.
-- A future wake-phrase mode uses a separate low-power keyword detector. Full Whisper inference
-  is not kept running continuously as a hotword detector. The proposed trigger is **Audio
-  Freedom**; after detection, the keyword runtime hands the same command session to Whisper and
-  the constrained DSP planner.
+- An optional Accessibility service detects a configurable Volume Up or Down hold.
+  It requests key filtering only, not screen content. The microphone runs only for the
+  resulting command and spoken-confirmation session, never for an idle wake phrase.
 
 ## Safety policy
+
+The local experimental build now uses a goal-and-preservation contract rather than direct
+LLM actions. See [Conversational tuning](CONVERSATIONAL_TUNING.md) for implemented behavior,
+explicit limits, and staged analyzer/A-B/profile follow-ups, and
+[Multilingual checks](TUNING_LANGUAGE_CHECKLIST.md) for the manual evaluation fixture.
+Standard compound commands remain deterministic. Model proposals always require review.
 
 - Conservative mode allows at most 1.5 dB per EQ band per command.
 - Balanced mode allows at most 3 dB per EQ band per command.
@@ -117,6 +127,6 @@ than a managed pack.
 2. Verified model-pack installer and removal flow.
 3. Pinned llama.cpp runtime and Qwen JSON tool adapter.
 4. Whisper push-to-talk pack, microphone permission flow, and private result feedback.
-5. Low-power wake-phrase pack and foreground microphone service.
+5. Volume-button activation and short-lived foreground microphone sessions.
 6. Media-session-aware deferred profile changes.
 7. Optional spectrum analysis supplied as measurements to the assistant.

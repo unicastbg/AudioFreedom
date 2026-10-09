@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="volume_shortcut_name">AudioFreedom volume shortcut</string>
+    <string name="volume_shortcut_description">Hold a volume button to start an offline voice command. Reads button events only, without requesting screen content. The microphone stays off between commands.</string>
     <string name="assistant_widget_name">AudioFreedom voice</string>
     <string name="assistant_widget_description">Start an AudioFreedom voice command</string>
 </resources>
