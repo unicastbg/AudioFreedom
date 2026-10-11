@@ -31,6 +31,11 @@ internal data class AudioFreedomSettings(
     val reverbDampingPercent: Int = 50,
     val reverbDecayMilliseconds: Int = 1400,
     val limiterEnabled: Boolean = true,
+    val volumeLevelerEnabled: Boolean = false,
+    val levelerTargetMillibels: Int = -1800,
+    val levelerStrengthPercent: Int = 50,
+    val levelerMaximumBoostMillibels: Int = 600,
+    val levelerResponseMilliseconds: Int = 1500,
     val limiterThresholdMillibels: Int = -100,
     val limiterReleaseMilliseconds: Int = 120,
 ) {
@@ -60,6 +65,11 @@ internal fun EqualizerPreset.applyTo(current: AudioFreedomSettings): AudioFreedo
         reverbDampingPercent = current.reverbDampingPercent,
         reverbDecayMilliseconds = current.reverbDecayMilliseconds,
         limiterEnabled = current.limiterEnabled,
+        volumeLevelerEnabled = current.volumeLevelerEnabled,
+        levelerTargetMillibels = current.levelerTargetMillibels,
+        levelerStrengthPercent = current.levelerStrengthPercent,
+        levelerMaximumBoostMillibels = current.levelerMaximumBoostMillibels,
+        levelerResponseMilliseconds = current.levelerResponseMilliseconds,
         limiterThresholdMillibels = current.limiterThresholdMillibels,
         limiterReleaseMilliseconds = current.limiterReleaseMilliseconds,
     )
@@ -88,6 +98,34 @@ internal enum class BassFoundationPreset(
                 it.cutoffHz == settings.bassCutoffHz &&
                     it.smallDriverSupportPercent == settings.bassDynamicsPercent
             }
+    }
+}
+
+internal enum class VolumeLevelerPreset(
+    val label: String, val strength: Int, val maximumBoost: Int, val response: Int,
+    val description: String,
+) {
+    Gentle("Gentle", 35, 300, 3000,
+        "Light leveling that preserves more of the music's natural dynamics."),
+    Balanced("Balanced", 65, 600, 1500,
+        "Moderate leveling for more consistent volume while retaining some dynamics."),
+    Night("Night", 100, 1200, 500,
+        "Strong leveling brings quiet and loud passages closer together. Use at low device volume.");
+
+    fun applyTo(settings: AudioFreedomSettings) = settings.copy(
+        volumeLevelerEnabled = true,
+        levelerTargetMillibels = -1800,
+        levelerStrengthPercent = strength,
+        levelerMaximumBoostMillibels = maximumBoost,
+        levelerResponseMilliseconds = response,
+    )
+
+    companion object {
+        fun matching(settings: AudioFreedomSettings) = entries.firstOrNull {
+            settings.levelerTargetMillibels == -1800 && settings.levelerStrengthPercent == it.strength &&
+                settings.levelerMaximumBoostMillibels == it.maximumBoost &&
+                settings.levelerResponseMilliseconds == it.response
+        }
     }
 }
 
@@ -290,14 +328,20 @@ internal object AudioFreedomSettingsStore {
             reverbDecayMilliseconds =
                 preferences.getInt(KeyReverbDecay, 1400).coerceIn(300, 5000),
             limiterEnabled = preferences.getBoolean(KeyLimiterEnabled, true),
+            volumeLevelerEnabled = preferences.getBoolean("leveler_enabled", false),
+            levelerTargetMillibels = preferences.getInt("leveler_target", -1800).coerceIn(-3000, -1200),
+            levelerStrengthPercent = preferences.getInt("leveler_strength", 50).coerceIn(0, 100),
+            levelerMaximumBoostMillibels = preferences.getInt("leveler_maximum_boost", 600).coerceIn(0, 1200),
+            levelerResponseMilliseconds = preferences.getInt("leveler_response", 1500).coerceIn(200, 5000),
             limiterThresholdMillibels =
                 preferences.getInt(KeyLimiterThreshold, -100).coerceIn(-600, 0),
             limiterReleaseMilliseconds =
                 preferences.getInt(KeyLimiterRelease, 120).coerceIn(20, 1000),
-        )
+        ).withVisibleEffects(AppPreferencesStore.load(context))
     }
 
     fun save(context: Context, settings: AudioFreedomSettings) {
+        val settings = settings.withVisibleEffects(AppPreferencesStore.load(context))
         val editor = context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
             .edit()
             .putBoolean(KeyEqualizerEnabled, settings.equalizerEnabled)
@@ -324,6 +368,11 @@ internal object AudioFreedomSettingsStore {
                 settings.reverbDecayMilliseconds.coerceIn(300, 5000),
             )
             .putBoolean(KeyLimiterEnabled, settings.limiterEnabled)
+            .putBoolean("leveler_enabled", settings.volumeLevelerEnabled)
+            .putInt("leveler_target", settings.levelerTargetMillibels.coerceIn(-3000, -1200))
+            .putInt("leveler_strength", settings.levelerStrengthPercent.coerceIn(0, 100))
+            .putInt("leveler_maximum_boost", settings.levelerMaximumBoostMillibels.coerceIn(0, 1200))
+            .putInt("leveler_response", settings.levelerResponseMilliseconds.coerceIn(200, 5000))
             .putInt(KeyLimiterThreshold, settings.limiterThresholdMillibels.coerceIn(-600, 0))
             .putInt(KeyLimiterRelease, settings.limiterReleaseMilliseconds.coerceIn(20, 1000))
         settings.bandGainsMillibels.forEachIndexed { band, gain ->

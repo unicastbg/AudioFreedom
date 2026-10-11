@@ -28,7 +28,8 @@ internal object AssistantCompoundCommands {
         }
         val toggle = Regex("^(turn on|turn off|enable|disable|включи|изключи) (.+)$").matchEntire(text)
         if (toggle != null && toggle.groupValues[2] in setOf("equalizer", "eq", "bass foundation", "detail recovery",
-                "immersive field", "reverb", "echo", "limiter", "output protection", "еквалайзера", "баса", "реверберацията", "ехото")) return text
+                "immersive field", "reverb", "echo", "volume leveler", "leveler", "normalizer", "sound normalizer",
+                "limiter", "output protection", "еквалайзера", "баса", "реверберацията", "ехото")) return text
         return when (text) {
             "clear vocals", "clearer vocals", "ясни вокали", "по-ясни вокали" -> "clearer vocals"
             "warmer sound", "по-топъл звук" -> "warmer sound"

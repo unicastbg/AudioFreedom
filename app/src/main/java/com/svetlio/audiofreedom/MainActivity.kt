@@ -3,6 +3,7 @@ package com.svetlio.audiofreedom
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -74,6 +76,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher = registerForActivityResult(
@@ -146,6 +151,7 @@ private enum class ControllerPage {
     Main,
     Settings,
     AssistantSettings,
+    MainPageSettings,
 }
 
 @Composable
@@ -187,11 +193,20 @@ private fun ControllerScreen(
     var detailRecoveryExpanded by rememberSaveable { mutableStateOf(false) }
     var immersiveFieldExpanded by rememberSaveable { mutableStateOf(false) }
     var reverbExpanded by rememberSaveable { mutableStateOf(false) }
+    var levelerExpanded by rememberSaveable { mutableStateOf(false) }
+    var analysisExpanded by rememberSaveable { mutableStateOf(false) }
+    var comparisonExpanded by rememberSaveable { mutableStateOf(false) }
+    var analysisFrame by remember { mutableStateOf<PlaybackAnalysisFrame?>(null) }
+    var analysisSupported by remember { mutableStateOf<Boolean?>(null) }
+    var analysisNow by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
+    var levelerPresetMenuExpanded by remember { mutableStateOf(false) }
     var outputMetrics by remember { mutableStateOf(AudioFreedomService.currentOutputMetrics) }
     val context = androidx.compose.ui.platform.LocalContext.current
     var appPreferences by remember { mutableStateOf(initialAppPreferences) }
     var profiles by remember { mutableStateOf(AudioFreedomProfileStore.list(context)) }
     var audioRoute by remember { mutableStateOf(AudioRouteDetector.current(context)) }
+    var comparison by remember { mutableStateOf(SoundComparisonStore.load(context, audioRoute.id)) }
+    val lifecycleOwner = LocalLifecycleOwner.current
     var assignedProfileId by remember {
         mutableStateOf(AppPreferencesStore.profileForRoute(context, audioRoute.id))
     }
@@ -251,6 +266,22 @@ private fun ControllerScreen(
     var voiceTestMessage by remember { mutableStateOf<String?>(null) }
     var voiceTestRunning by remember { mutableStateOf(false) }
     var widgetMessage by remember { mutableStateOf<String?>(null) }
+
+    val analysisVisible = appPreferences.isVisible(MainPageFunction.PlaybackAnalysis)
+    DisposableEffect(lifecycleOwner, enabled, analysisExpanded, currentPage, analysisVisible) {
+        fun request() {
+            AudioFreedomService.requestPlaybackAnalysis(context,
+                enabled && analysisExpanded && analysisVisible && currentPage == ControllerPage.Main &&
+                    lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+        }
+        val observer = LifecycleEventObserver { _, _ -> request() }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        request()
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            AudioFreedomService.requestPlaybackAnalysis(context, false)
+        }
+    }
 
     DisposableEffect(voiceRecorder, voiceAudioSession) {
         onDispose {
@@ -360,6 +391,7 @@ private fun ControllerScreen(
         driverState == DriverState.Attached || driverState == DriverState.Detected
 
     fun commitSettings(updated: AudioFreedomSettings, keepAssistantUndo: Boolean = false) {
+        val updated = updated.withVisibleEffects(appPreferences)
         if (!keepAssistantUndo) {
             assistantUndoSettings = null
             assistantUndoProfileId = null
@@ -377,10 +409,14 @@ private fun ControllerScreen(
     LaunchedEffect(enabled) {
         if (!enabled) {
             outputMetrics = null
+            analysisFrame = null
             return@LaunchedEffect
         }
         while (true) {
             outputMetrics = AudioFreedomService.currentOutputMetrics
+            analysisFrame = AudioFreedomService.currentPlaybackAnalysis
+            analysisSupported = AudioFreedomService.analysisSupported
+            analysisNow = SystemClock.elapsedRealtime()
             delay(250L)
         }
     }
@@ -421,6 +457,7 @@ private fun ControllerScreen(
             val detectedRoute = AudioRouteDetector.current(context)
             if (detectedRoute.id != audioRoute.id) {
                 audioRoute = detectedRoute
+                comparison = SoundComparisonStore.load(context, detectedRoute.id)
                 assignedProfileId =
                     AppPreferencesStore.profileForRoute(context, detectedRoute.id)
                 if (appPreferences.automaticDeviceProfiles) {
@@ -676,6 +713,8 @@ private fun ControllerScreen(
                             Text("Settings", fontWeight = FontWeight.SemiBold)
                         ControllerPage.AssistantSettings ->
                             Text("Local assistant", fontWeight = FontWeight.SemiBold)
+                        ControllerPage.MainPageSettings ->
+                            Text("Main page functions", fontWeight = FontWeight.SemiBold)
                         ControllerPage.Main -> {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("AudioFreedom", fontWeight = FontWeight.SemiBold)
@@ -689,7 +728,8 @@ private fun ControllerScreen(
                     if (currentPage != ControllerPage.Main) {
                         IconButton(
                             onClick = {
-                                currentPage = if (currentPage == ControllerPage.AssistantSettings) {
+                                currentPage = if (currentPage == ControllerPage.AssistantSettings ||
+                                    currentPage == ControllerPage.MainPageSettings) {
                                     ControllerPage.Settings
                                 } else {
                                     ControllerPage.Main
@@ -754,6 +794,18 @@ private fun ControllerScreen(
                 },
                 onOpenAssistantSettings = {
                     currentPage = ControllerPage.AssistantSettings
+                },
+                onOpenMainPageSettings = { currentPage = ControllerPage.MainPageSettings },
+                modifier = Modifier.padding(contentPadding),
+            )
+            ControllerPage.MainPageSettings -> MainPageSettingsScreen(
+                preferences = appPreferences,
+                onPreferencesChanged = { updated ->
+                    appPreferences = updated
+                    onAppPreferencesChanged(updated)
+                    commitSettings(settings.withVisibleEffects(updated))
+                    selectedProfileId = profiles.firstOrNull { it.settings == settings }?.id
+                    assistantProposal = null
                 },
                 modifier = Modifier.padding(contentPadding),
             )
@@ -901,6 +953,42 @@ private fun ControllerScreen(
                 },
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            if (appPreferences.isVisible(MainPageFunction.SoundComparison)) {
+            SoundComparisonPanel(
+                comparison = comparison,
+                current = settings,
+                expanded = comparisonExpanded,
+                available = !assistantBusy,
+                onToggle = { comparisonExpanded = !comparisonExpanded },
+                onCapture = { slot ->
+                    comparison = comparison.capture(slot, settings)
+                    SoundComparisonStore.save(context, audioRoute.id, comparison)
+                },
+                onSelect = { slot ->
+                    comparison = comparison.activate(slot, settings)
+                    SoundComparisonStore.save(context, audioRoute.id, comparison)
+                    comparison.settings(slot)?.let { snapshot ->
+                        assistantProposal = null
+                        commitSettings(snapshot)
+                        selectedProfileId = profiles.firstOrNull { it.settings == snapshot }?.id
+                    }
+                },
+                onClear = {
+                    comparison = SoundComparison()
+                    SoundComparisonStore.save(context, audioRoute.id, comparison)
+                },
+            )
+            }
+            if (analysisVisible) {
+            PlaybackAnalysisPanel(
+                expanded = analysisExpanded,
+                processing = enabled && driverState == DriverState.Attached,
+                supported = analysisSupported,
+                frame = analysisFrame,
+                now = analysisNow,
+                onToggle = { analysisExpanded = !analysisExpanded },
+            )
+            }
             if (appPreferences.assistantEnabled) {
                 AssistantPanel(
                     expanded = assistantExpanded,
@@ -963,6 +1051,7 @@ private fun ControllerScreen(
                     },
                 )
             }
+            if (appPreferences.isVisible(MainPageFunction.Equalizer)) {
             CollapsibleEffectSection(
                 title = "Equalizer",
                 summary = selectedPreset?.label ?: "Custom",
@@ -1038,6 +1127,8 @@ private fun ControllerScreen(
                 Spacer(Modifier.height(14.dp))
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+            if (appPreferences.isVisible(MainPageFunction.ImmersiveField)) {
             CollapsibleEffectSection(
                 title = "Immersive field",
                 summary = if (settings.immersiveFieldEnabled) {
@@ -1121,6 +1212,8 @@ private fun ControllerScreen(
                 Spacer(Modifier.height(14.dp))
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+            if (appPreferences.isVisible(MainPageFunction.Reverb)) {
             CollapsibleEffectSection(
                 title = "Reverb",
                 summary = if (settings.reverbEnabled) {
@@ -1214,6 +1307,91 @@ private fun ControllerScreen(
                 Spacer(Modifier.height(14.dp))
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+            if (appPreferences.isVisible(MainPageFunction.VolumeLeveler)) {
+            CollapsibleEffectSection(
+                title = "Volume leveler",
+                summary = if (settings.volumeLevelerEnabled) {
+                    VolumeLevelerPreset.matching(settings)?.label ?: "Custom"
+                } else "Off",
+                expanded = levelerExpanded,
+                onExpandedChange = { levelerExpanded = it },
+                enabled = settings.volumeLevelerEnabled,
+                onEnabledChange = { commitSettings(settings.copy(volumeLevelerEnabled = it)) },
+            ) {
+                val levelerPreset = VolumeLevelerPreset.matching(settings)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    androidx.compose.foundation.layout.Box {
+                        TextButton(onClick = { levelerPresetMenuExpanded = true }) {
+                            Text("Preset")
+                            Icon(Icons.Rounded.ExpandMore, contentDescription = null)
+                        }
+                        DropdownMenu(levelerPresetMenuExpanded,
+                            onDismissRequest = { levelerPresetMenuExpanded = false }) {
+                            VolumeLevelerPreset.entries.forEach { preset ->
+                                DropdownMenuItem(text = {
+                                    Column(Modifier.widthIn(max = 280.dp)) {
+                                        Text(preset.label)
+                                        Text(preset.description, style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }, onClick = {
+                                    levelerPresetMenuExpanded = false
+                                    commitSettings(preset.applyTo(settings))
+                                })
+                            }
+                        }
+                    }
+                }
+                levelerPreset?.let {
+                    Text(it.description, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp))
+                }
+                SettingSlider(
+                    label = "Target RMS",
+                    valueLabel = String.format(Locale.US, "%.0f dBFS", settings.levelerTargetMillibels / 100F),
+                    value = settings.levelerTargetMillibels.toFloat(),
+                    valueRange = -3000F..-1200F, steps = 17,
+                    enabled = settings.volumeLevelerEnabled,
+                    onValueChange = { settings = settings.copy(levelerTargetMillibels =
+                        ((it / 100F).roundToInt() * 100).coerceIn(-3000, -1200)) },
+                    onValueChangeFinished = { commitSettings(settings) },
+                )
+                PercentageSlider(
+                    label = "Strength", value = settings.levelerStrengthPercent,
+                    enabled = settings.volumeLevelerEnabled,
+                    onValueChange = { settings = settings.copy(levelerStrengthPercent = it) },
+                    onValueChangeFinished = { commitSettings(settings) },
+                )
+                SettingSlider(
+                    label = "Maximum boost",
+                    valueLabel = String.format(Locale.US, "%.1f dB", settings.levelerMaximumBoostMillibels / 100F),
+                    value = settings.levelerMaximumBoostMillibels.toFloat(),
+                    valueRange = 0F..1200F, steps = 23,
+                    enabled = settings.volumeLevelerEnabled,
+                    onValueChange = { settings = settings.copy(levelerMaximumBoostMillibels =
+                        ((it / 50F).roundToInt() * 50).coerceIn(0, 1200)) },
+                    onValueChangeFinished = { commitSettings(settings) },
+                )
+                SettingSlider(
+                    label = "Response",
+                    valueLabel = String.format(Locale.US, "%.1f s", settings.levelerResponseMilliseconds / 1000F),
+                    value = settings.levelerResponseMilliseconds.toFloat(),
+                    valueRange = 200F..5000F, steps = 47,
+                    enabled = settings.volumeLevelerEnabled,
+                    onValueChange = { settings = settings.copy(levelerResponseMilliseconds =
+                        ((it / 100F).roundToInt() * 100).coerceIn(200, 5000)) },
+                    onValueChangeFinished = { commitSettings(settings) },
+                )
+                Text("Peak protection: output ceiling, or -1 dBFS when output protection is off",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(14.dp))
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+            if (appPreferences.isVisible(MainPageFunction.DetailRecovery)) {
             CollapsibleEffectSection(
                 title = "Detail recovery",
                 summary = if (settings.detailRecoveryEnabled) {
@@ -1305,6 +1483,8 @@ private fun ControllerScreen(
                 Spacer(Modifier.height(14.dp))
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+            if (appPreferences.isVisible(MainPageFunction.BassFoundation)) {
             CollapsibleEffectSection(
                 title = "Bass foundation",
                 summary = if (settings.dynamicBassEnabled) {
@@ -1390,6 +1570,8 @@ private fun ControllerScreen(
                 Spacer(Modifier.height(14.dp))
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+            if (appPreferences.isVisible(MainPageFunction.OutputProtection)) {
             CollapsibleEffectSection(
                 title = "Output protection",
                 summary = if (settings.limiterEnabled) {
@@ -1444,6 +1626,7 @@ private fun ControllerScreen(
                 Spacer(Modifier.height(14.dp))
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
             Spacer(Modifier.height(24.dp))
             }
         }

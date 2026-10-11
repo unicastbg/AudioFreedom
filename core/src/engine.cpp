@@ -35,6 +35,8 @@ bool Engine::prepare(const StreamConfig config) noexcept {
     }
 
     config_ = config;
+    leveler_.prepare(config.sample_rate_hz);
+    analyzer_.prepare(config.sample_rate_hz, config.channel_count);
     applied_equalizer_revision_ = 0;
     reset();
     refresh_equalizer();
@@ -45,6 +47,8 @@ void Engine::reset() noexcept {
     processed_frames_.store(0, std::memory_order_relaxed);
     clear_equalizer_state();
     limiter_gain_ = 1.0F;
+    leveler_.reset();
+    analyzer_.reset();
     bass_lowpass_states_.fill({});
     bass_deep_lowpass_states_.fill({});
     bass_harmonic_dc_states_.fill(0.0F);
@@ -387,12 +391,19 @@ bool Engine::process(float* const samples, const std::size_t frame_count) noexce
     float block_input_peak = 0.0F;
     float block_output_peak = 0.0F;
     float block_gain_reduction = 0.0F;
+    const bool analyze = analysis_lease_.active();
+    if (analyze != analysis_active_) {
+        analyzer_.reset();
+        analysis_active_ = analyze;
+    }
 
     if (enabled()) {
         refresh_equalizer();
         const auto millibels = preamp_millibels();
         const float linear_gain = std::pow(10.0F, static_cast<float>(millibels) / 2000.0F);
-        const bool use_limiter = limiter_enabled();
+        const auto leveler_config = volume_leveler_configuration();
+        leveler_.configure(leveler_config);
+        const bool use_limiter = limiter_enabled() || leveler_config.enabled;
         const bool use_dynamic_bass = dynamic_bass_enabled();
         const bool use_detail_recovery = detail_recovery_enabled();
         const bool use_immersive_field =
@@ -536,13 +547,15 @@ bool Engine::process(float* const samples, const std::size_t frame_count) noexce
         }
         reverb_state_active_ = use_reverb;
         const float limiter_threshold = std::pow(
-                10.0F, static_cast<float>(limiter_threshold_millibels()) / 2000.0F);
+                10.0F, static_cast<float>(limiter_enabled()
+                        ? limiter_threshold_millibels() : -100) / 2000.0F);
         const float release_seconds =
                 static_cast<float>(limiter_release_milliseconds()) / 1000.0F;
         const float release_coefficient = 1.0F - std::exp(
                 -1.0F / (release_seconds * static_cast<float>(config_.sample_rate_hz)));
 
         for (std::size_t frame = 0; frame < frame_count; ++frame) {
+            if (analyze) analyzer_.input(samples + frame * config_.channel_count);
             for (std::size_t channel = 0; channel < config_.channel_count; ++channel) {
                 const std::size_t index = frame * config_.channel_count + channel;
                 block_input_peak = std::max(block_input_peak, std::abs(samples[index]));
@@ -780,6 +793,8 @@ bool Engine::process(float* const samples, const std::size_t frame_count) noexce
                         (reverb_delay_index_ + 1) % kReverbDelayCapacity;
             }
 
+            leveler_.process_frame(samples + frame * config_.channel_count,
+                                   config_.channel_count);
             float frame_peak = 0.0F;
             for (std::size_t channel = 0; channel < config_.channel_count; ++channel) {
                 const std::size_t index = frame * config_.channel_count + channel;
@@ -806,9 +821,17 @@ bool Engine::process(float* const samples, const std::size_t frame_count) noexce
                 samples[index] *= limiter_gain_;
                 block_output_peak = std::max(block_output_peak, std::abs(samples[index]));
             }
+            if (analyze) analyzer_.output(samples + frame * config_.channel_count);
         }
     } else {
         limiter_gain_ = 1.0F;
+        leveler_.reset();
+        if (analyze) {
+            for (std::size_t frame = 0; frame < frame_count; ++frame) {
+                analyzer_.input(samples + frame * config_.channel_count);
+                analyzer_.output(samples + frame * config_.channel_count);
+            }
+        }
         const std::size_t sample_count = frame_count * config_.channel_count;
         for (std::size_t index = 0; index < sample_count; ++index) {
             const float magnitude = std::abs(samples[index]);
@@ -831,6 +854,19 @@ bool Engine::process(float* const samples, const std::size_t frame_count) noexce
 
 StreamConfig Engine::stream_config() const noexcept {
     return config_;
+}
+
+void Engine::set_volume_leveler_configuration(VolumeLevelerConfig config) noexcept {
+    leveler_target_.store(std::clamp(config.target_millibels, -3000, -1200));
+    leveler_strength_.store(std::min(config.strength_percent, 100U));
+    leveler_maximum_boost_.store(std::min(config.maximum_boost_millibels, 1200U));
+    leveler_response_.store(std::clamp(config.response_milliseconds, 200U, 5000U));
+    leveler_enabled_.store(config.enabled);
+}
+
+VolumeLevelerConfig Engine::volume_leveler_configuration() const noexcept {
+    return {leveler_enabled_.load(), leveler_target_.load(), leveler_strength_.load(),
+            leveler_maximum_boost_.load(), leveler_response_.load()};
 }
 
 std::uint64_t Engine::processed_frames() const noexcept {

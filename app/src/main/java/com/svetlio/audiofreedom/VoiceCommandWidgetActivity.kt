@@ -48,7 +48,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,7 +56,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private enum class WidgetVoicePhase {
+internal enum class WidgetVoicePhase {
     Preparing,
     Listening,
     Transcribing,
@@ -65,7 +64,16 @@ private enum class WidgetVoicePhase {
     Review,
     Applied,
     Information,
-    Error,
+    Error;
+
+    val canStartSession: Boolean
+        get() = when (this) {
+            Review, Applied, Information, Error -> true
+            Preparing, Listening, Transcribing, Interpreting -> false
+        }
+
+    fun microphoneEnabled(sessionBusy: Boolean): Boolean =
+        this == Listening || (canStartSession && !sessionBusy)
 }
 
 class VoiceCommandWidgetActivity : ComponentActivity() {
@@ -78,7 +86,7 @@ class VoiceCommandWidgetActivity : ComponentActivity() {
     private var detail by mutableStateOf<String?>(null)
     private var pendingProposal by mutableStateOf<AssistantProposal?>(null)
     private var undoAvailable by mutableStateOf(false)
-    private val sessionStarted = AtomicBoolean(false)
+    private var sessionBusy by mutableStateOf(false)
     private val microphonePermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -108,8 +116,10 @@ class VoiceCommandWidgetActivity : ComponentActivity() {
                     microphoneLevel = microphoneLevel,
                     headline = headline,
                     detail = detail,
+                    sessionBusy = sessionBusy,
                     onVoiceCircleClick = {
                         if (phase == WidgetVoicePhase.Listening) recorder.stop()
+                        else if (phase.microphoneEnabled(sessionBusy)) requestVoiceSession()
                     },
                     onApply = { pendingProposal?.let(::applyProposal) },
                     undoAvailable = undoAvailable,
@@ -119,6 +129,11 @@ class VoiceCommandWidgetActivity : ComponentActivity() {
             }
         }
 
+        requestVoiceSession()
+    }
+
+    private fun requestVoiceSession() {
+        if (sessionBusy || isFinishing || isDestroyed) return
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
         ) {
@@ -136,29 +151,34 @@ class VoiceCommandWidgetActivity : ComponentActivity() {
     }
 
     private fun beginVoiceSession() {
-        if (!sessionStarted.compareAndSet(false, true)) return
-        val preferences = AppPreferencesStore.load(this)
-        when {
-            !preferences.assistantEnabled -> {
-                showError("Enable the local assistant in AudioFreedom settings")
-                return
-            }
-            !preferences.assistantVoiceEnabled ||
-                !AssistantRuntimeManager.voiceModelInfo().installed -> {
-                showError("Install and enable the voice language pack first")
-                return
-            }
-        }
-
-        phase = WidgetVoicePhase.Listening
-        headline = "Listening"
-        detail = "Speak now. Tap the circle to stop."
-        audioSession.beginManualSession()
-        if (preferences.assistantPauseMediaForVoice) {
-            audioSession.requestPlaybackPause()
-        }
+        if (sessionBusy || isFinishing || isDestroyed) return
+        sessionBusy = true
+        pendingProposal = null
+        microphoneLevel = 0F
+        phase = WidgetVoicePhase.Preparing
+        headline = "Preparing voice command"
+        detail = null
         activityScope.launch {
             try {
+                val preferences = AppPreferencesStore.load(this@VoiceCommandWidgetActivity)
+                when {
+                    !preferences.assistantEnabled -> {
+                        showError("Enable the local assistant in AudioFreedom settings")
+                        return@launch
+                    }
+                    !preferences.assistantVoiceEnabled ||
+                        !AssistantRuntimeManager.voiceModelInfo().installed -> {
+                        showError("Install and enable the voice language pack first")
+                        return@launch
+                    }
+                }
+                phase = WidgetVoicePhase.Listening
+                headline = "Listening"
+                detail = "Speak now. Tap the circle to stop."
+                audioSession.beginManualSession()
+                if (preferences.assistantPauseMediaForVoice) {
+                    audioSession.requestPlaybackPause()
+                }
                 when (
                     val recording = withContext(Dispatchers.IO) {
                         recorder.record(
@@ -183,6 +203,10 @@ class VoiceCommandWidgetActivity : ComponentActivity() {
                 throw cancellation
             } catch (error: Exception) {
                 showError(error.message ?: "Voice command failed")
+            } finally {
+                microphoneLevel = 0F
+                audioSession.restorePlayback()
+                sessionBusy = false
             }
         }
     }
@@ -243,7 +267,7 @@ class VoiceCommandWidgetActivity : ComponentActivity() {
             )
         ) {
             is AssistantPlanResult.Proposed -> showProposal(result.proposal, preferences)
-            AssistantPlanResult.Undo -> undoLastChange(
+            AssistantPlanResult.Undo -> restoreLastChange(
                 speakConfirmation = preferences.assistantSpeakVoiceConfirmation,
             )
             is AssistantPlanResult.NotUnderstood -> showError(result.message)
@@ -305,35 +329,50 @@ class VoiceCommandWidgetActivity : ComponentActivity() {
     }
 
     private fun undoLastChange(speakConfirmation: Boolean = false) {
+        if (sessionBusy || isFinishing || isDestroyed) return
+        sessionBusy = true
+        activityScope.launch {
+            try {
+                restoreLastChange(speakConfirmation)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                showError(error.message ?: "Could not undo the last change")
+            } finally {
+                audioSession.restorePlayback()
+                sessionBusy = false
+            }
+        }
+    }
+
+    private suspend fun restoreLastChange(speakConfirmation: Boolean) {
         val previous = AssistantUndoStore.load(this)
         if (previous == null) {
             showError("There is no assistant change to undo")
             return
         }
-        activityScope.launch {
-            val spokenResult = if (speakConfirmation) {
-                audioSession.speakPlannedChange(
-                    change = "Restore previous settings",
-                    applying = true,
-                )
-            } else null
-            AudioFreedomService.updateSettings(this@VoiceCommandWidgetActivity, previous)
-            AssistantUndoStore.clear(this@VoiceCommandWidgetActivity)
-            pendingProposal = null
-            undoAvailable = false
-            phase = WidgetVoicePhase.Applied
-            headline = "Last change undone"
-            detail = when (spokenResult) {
-                SpokenConfirmationResult.NoSpeechEngine ->
-                    "Previous settings restored. No Android text-to-speech engine is installed or enabled. Open Local assistant > Spoken replies."
-                SpokenConfirmationResult.NoOfflineVoice ->
-                    "Previous settings restored. No offline speech voice is installed for this reply. Open Local assistant > Spoken replies."
-                SpokenConfirmationResult.Failed ->
-                    "Previous settings restored, but Android could not play the spoken confirmation."
-                else -> "Previous settings restored"
-            }
-            audioSession.restorePlayback()
+        val spokenResult = if (speakConfirmation) {
+            audioSession.speakPlannedChange(
+                change = "Restore previous settings",
+                applying = true,
+            )
+        } else null
+        AudioFreedomService.updateSettings(this, previous)
+        AssistantUndoStore.clear(this)
+        pendingProposal = null
+        undoAvailable = false
+        phase = WidgetVoicePhase.Applied
+        headline = "Last change undone"
+        detail = when (spokenResult) {
+            SpokenConfirmationResult.NoSpeechEngine ->
+                "Previous settings restored. No Android text-to-speech engine is installed or enabled. Open Local assistant > Spoken replies."
+            SpokenConfirmationResult.NoOfflineVoice ->
+                "Previous settings restored. No offline speech voice is installed for this reply. Open Local assistant > Spoken replies."
+            SpokenConfirmationResult.Failed ->
+                "Previous settings restored, but Android could not play the spoken confirmation."
+            else -> "Previous settings restored"
         }
+        audioSession.restorePlayback()
     }
 
     private fun showError(message: String) {
@@ -351,6 +390,7 @@ private fun VoiceCommandWidgetPanel(
     microphoneLevel: Float,
     headline: String,
     detail: String?,
+    sessionBusy: Boolean,
     onVoiceCircleClick: () -> Unit,
     onApply: () -> Unit,
     undoAvailable: Boolean,
@@ -376,6 +416,7 @@ private fun VoiceCommandWidgetPanel(
             VoiceAwareCircle(
                 phase = phase,
                 level = microphoneLevel,
+                sessionBusy = sessionBusy,
                 onClick = onVoiceCircleClick,
             )
             Spacer(Modifier.height(18.dp))
@@ -403,7 +444,7 @@ private fun VoiceCommandWidgetPanel(
                         Icon(Icons.Rounded.Close, contentDescription = null)
                         Text("Cancel")
                     }
-                    TextButton(onClick = onApply) {
+                    TextButton(onClick = onApply, enabled = !sessionBusy) {
                         Icon(Icons.Rounded.Check, contentDescription = null)
                         Text("Apply")
                     }
@@ -413,7 +454,7 @@ private fun VoiceCommandWidgetPanel(
                     horizontalArrangement = Arrangement.End,
                 ) {
                     if (undoAvailable) {
-                        TextButton(onClick = onUndo) {
+                        TextButton(onClick = onUndo, enabled = !sessionBusy) {
                             Icon(Icons.AutoMirrored.Rounded.Undo, contentDescription = null)
                             Text("Undo")
                         }
@@ -437,13 +478,14 @@ private fun VoiceCommandWidgetPanel(
 private fun VoiceAwareCircle(
     phase: WidgetVoicePhase,
     level: Float,
+    sessionBusy: Boolean,
     onClick: () -> Unit,
 ) {
     val scale by animateFloatAsState(
         targetValue = if (phase == WidgetVoicePhase.Listening) 1F + level * 0.22F else 1F,
         label = "voice-level",
     )
-    val active = phase == WidgetVoicePhase.Listening
+    val active = phase.microphoneEnabled(sessionBusy)
     Box(
         modifier = Modifier
             .size(118.dp)
@@ -474,15 +516,9 @@ private fun VoiceAwareCircle(
                     modifier = Modifier.size(34.dp),
                     tint = MaterialTheme.colorScheme.onPrimary,
                 )
-                WidgetVoicePhase.Applied -> Icon(
-                    Icons.Rounded.Check,
-                    contentDescription = "Applied",
-                    modifier = Modifier.size(34.dp),
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                )
                 else -> Icon(
                     Icons.Rounded.Mic,
-                    contentDescription = null,
+                    contentDescription = "Start another voice command",
                     modifier = Modifier.size(34.dp),
                     tint = MaterialTheme.colorScheme.onPrimary,
                 )

@@ -99,6 +99,12 @@ bool validateAndPrepare(EffectModule& module, const effect_config_t& config) {
 
 bool applyMessage(audiofreedom::Engine& engine, const WireMessage& message) {
     switch (message.parameter_id) {
+        case ParameterId::kAnalysisEnabled: {
+            const auto value = audiofreedom::protocol::read_analysis_enabled(message);
+            if (!value) return false;
+            engine.set_analysis_enabled(*value);
+            return true;
+        }
         case ParameterId::kEnabled: {
             const auto value = audiofreedom::protocol::read_enabled(message);
             if (!value) return false;
@@ -207,6 +213,16 @@ bool applyMessage(audiofreedom::Engine& engine, const WireMessage& message) {
             engine.set_reverb_decay_milliseconds(value->decay_milliseconds);
             return true;
         }
+        case ParameterId::kVolumeLevelerConfiguration: {
+            const auto value = audiofreedom::protocol::read_volume_leveler_configuration(message);
+            if (!value) return false;
+            const audiofreedom::VolumeLevelerConfig config{value->enabled,
+                    value->target_millibels, value->strength_percent,
+                    value->maximum_boost_millibels, value->response_milliseconds};
+            if (!config.valid()) return false;
+            engine.set_volume_leveler_configuration(config);
+            return true;
+        }
         default:
             return false;
     }
@@ -216,6 +232,10 @@ std::optional<WireMessage> queryMessage(const EffectModule& module,
                                         const WireMessage& query) {
     if (query.payload_size != 0) return std::nullopt;
     switch (query.parameter_id) {
+        case ParameterId::kPlaybackAnalysis:
+        case ParameterId::kPlaybackSpectrum:
+            return audiofreedom::protocol::make_playback_analysis(module.engine.playback_analysis(),
+                    query.parameter_id == ParameterId::kPlaybackSpectrum);
         case ParameterId::kProtocolVersion:
             return audiofreedom::protocol::make_protocol_version();
         case ParameterId::kEnabled:

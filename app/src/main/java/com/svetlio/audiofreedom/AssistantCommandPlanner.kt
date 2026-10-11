@@ -637,6 +637,12 @@ internal object AssistantCommandPlanner {
             update = { settings, enabled -> settings.copy(reverbEnabled = enabled) },
         )
         applyToggle(
+            label = "Volume leveler",
+            aliases = listOf("volume leveler", "leveler", "normalizer", "sound normalizer"),
+            currentlyEnabled = current.volumeLevelerEnabled,
+            update = { settings, enabled -> settings.copy(volumeLevelerEnabled = enabled) },
+        )
+        applyToggle(
             label = "Output protection",
             aliases = listOf(
                 "limiter",
@@ -773,6 +779,9 @@ internal object AssistantCommandPlanner {
         }
         if (before.limiterEnabled != after.limiterEnabled) {
             add("Output protection ${if (after.limiterEnabled) "on" else "off"}")
+        }
+        if (before.volumeLevelerEnabled != after.volumeLevelerEnabled) {
+            add("Volume leveler ${if (after.volumeLevelerEnabled) "on" else "off"}")
         }
     }
 

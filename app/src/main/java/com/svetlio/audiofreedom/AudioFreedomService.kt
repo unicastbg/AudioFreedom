@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
@@ -96,6 +97,7 @@ private class SessionZeroEffectController {
     }
 
     fun release() {
+        effect?.let { sendParameter(it, AudioFreedomProtocol.analysisEnabled(false)) }
         effect?.release()
         effect = null
     }
@@ -135,6 +137,11 @@ private class SessionZeroEffectController {
             if (!reverbConfigured) {
                 return false
             }
+            val levelerConfigured = sendParameter(
+                currentEffect, AudioFreedomProtocol.volumeLevelerConfiguration(settings),
+            )
+            // Older drivers can still run existing effects when leveling is disabled.
+            if (!levelerConfigured && settings.volumeLevelerEnabled) return false
             return sendParameter(
                 currentEffect,
                 AudioFreedomProtocol.limiterConfiguration(settings),
@@ -172,6 +179,30 @@ private class SessionZeroEffectController {
         } catch (_: RuntimeException) {
             null
         }
+    }
+
+    fun setAnalysisEnabled(enabled: Boolean): Boolean = effect?.let {
+        sendParameter(it, AudioFreedomProtocol.analysisEnabled(enabled))
+    } ?: false
+
+    fun queryPlaybackAnalysis(): PlaybackAnalysis? {
+        val currentEffect = effect ?: return null
+        return try {
+            repeat(2) {
+                val metrics = ByteArray(40)
+                val spectrum = ByteArray(40)
+                val first = getParameterMethod.invoke(currentEffect,
+                    AudioFreedomProtocol.playbackAnalysisQuery(), metrics) as Int
+                val second = getParameterMethod.invoke(currentEffect,
+                    AudioFreedomProtocol.playbackAnalysisQuery(true), spectrum) as Int
+                if (first == 40 && second == 40) {
+                    AudioFreedomProtocol.readPlaybackAnalysis(metrics, spectrum)?.let { return it }
+                }
+            }
+            null
+        } catch (_: ReflectiveOperationException) { null }
+          catch (_: SecurityException) { null }
+          catch (_: RuntimeException) { null }
     }
 
     private fun sendParameter(effect: AudioEffect, message: ByteArray): Boolean = try {
@@ -214,9 +245,24 @@ class AudioFreedomService : Service() {
     private val meterHandler = Handler(Looper.getMainLooper())
     private var foregroundStarted = false
     private var notificationPresentation: NotificationPresentation? = null
+    private val analysisTracker = PlaybackAnalysisTracker()
+    private var analysisWasRequested = false
     private val meterPoll = object : Runnable {
         override fun run() {
             currentOutputMetrics = effectController.queryOutputMetrics()
+            if (analysisRequested) {
+                analysisWasRequested = true
+                analysisSupported = effectController.setAnalysisEnabled(true)
+                currentPlaybackAnalysis = analysisTracker.update(
+                    if (analysisSupported == true) effectController.queryPlaybackAnalysis() else null,
+                    SystemClock.elapsedRealtime(),
+                )
+            } else {
+                if (analysisWasRequested) effectController.setAnalysisEnabled(false)
+                analysisWasRequested = false
+                analysisTracker.reset()
+                currentPlaybackAnalysis = null
+            }
             if (effectController.isAttached) {
                 meterHandler.postDelayed(this, METER_INTERVAL_MILLISECONDS)
             }
@@ -335,6 +381,10 @@ class AudioFreedomService : Service() {
     private fun stopMetering() {
         meterHandler.removeCallbacks(meterPoll)
         currentOutputMetrics = null
+        analysisTracker.reset()
+        analysisWasRequested = false
+        currentPlaybackAnalysis = null
+        analysisSupported = null
     }
 
     private fun updateForegroundNotification(isPaused: Boolean) {
@@ -415,7 +465,8 @@ class AudioFreedomService : Service() {
             val profile = AudioFreedomProfileStore.list(this).firstOrNull { it.id == profileId }
             if (profile != null) {
                 AudioFreedomSettingsStore.save(this, profile.settings)
-                if (effectController.isAttached && !effectController.applySettings(profile.settings)) {
+                if (effectController.isAttached &&
+                    !effectController.applySettings(AudioFreedomSettingsStore.load(this))) {
                     currentState = DriverState.ParameterError
                 }
                 Log.i(TAG, "Applied profile ${profile.name} for ${route.label}")
@@ -440,6 +491,8 @@ class AudioFreedomService : Service() {
             "com.svetlio.audiofreedom.action.APPLY_SETTINGS"
         private const val ACTION_REFRESH_STATUS =
             "com.svetlio.audiofreedom.action.REFRESH_STATUS"
+        private const val ACTION_ANALYSIS =
+            "com.svetlio.audiofreedom.action.ANALYSIS"
 
         @Volatile
         internal var currentState: DriverState = DriverState.Detected
@@ -448,6 +501,22 @@ class AudioFreedomService : Service() {
         @Volatile
         internal var currentOutputMetrics: AudioOutputMetrics? = null
             private set
+
+        @Volatile internal var currentPlaybackAnalysis: PlaybackAnalysisFrame? = null
+            private set
+        @Volatile internal var analysisSupported: Boolean? = null
+            private set
+        @Volatile private var analysisRequested = false
+
+        internal fun requestPlaybackAnalysis(context: Context, requested: Boolean) {
+            if (analysisRequested == requested) return
+            analysisRequested = requested
+            if (!requested) currentPlaybackAnalysis = null
+            if (isRequestedEnabled(context)) {
+                ContextCompat.startForegroundService(context,
+                    Intent(context, AudioFreedomService::class.java).setAction(ACTION_ANALYSIS))
+            }
+        }
 
         @Volatile
         internal var currentAudioRoute: AudioRoute = AudioRoute(

@@ -16,7 +16,10 @@ change, and then returns audio focus to the player.
 
 The **AudioFreedom voice** home-screen widget opens a compact voice panel. It listens until you
 finish speaking, shows the interpreted action, and offers Apply or Undo without opening the main
-app.
+app. Once the command or spoken reply finishes, tap the microphone circle to issue another
+command in the same panel. Starting a new command from the review screen discards the
+unconfirmed proposal without applying it. Recording, interpretation, readback, and undo
+cannot overlap a new command.
 
 ## Hands-free voice (local test build)
 
@@ -169,6 +172,10 @@ Turn off output protection
 ```
 
 ## Profiles And Undo
+
+In the local Volume Leveler development build, **Turn on volume leveler**, **Turn off
+volume leveler**, and **Volume leveler help** are also supported. Gentle, Balanced, and
+Night presets are selected in the app. Install the matching new module before enabling it.
 
 Say the saved profile name exactly as it appears in AudioFreedom:
 

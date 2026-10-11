@@ -54,6 +54,7 @@ internal data class AppPreferences(
     val theme: ThemePreference = ThemePreference.System,
     val automaticDeviceProfiles: Boolean = false,
     val showDeviceInNotification: Boolean = true,
+    val hiddenMainPageFunctions: Set<MainPageFunction> = emptySet(),
     val assistantEnabled: Boolean = false,
     val assistantConversationalTuning: Boolean = false,
     val assistantLanguage: AssistantLanguage = AssistantLanguage.English,
@@ -81,6 +82,7 @@ internal object AppPreferencesStore {
     private const val KeyTheme = "theme"
     private const val KeyAutomaticDeviceProfiles = "automatic_device_profiles"
     private const val KeyShowDeviceInNotification = "show_device_in_notification"
+    private const val KeyHiddenMainPageFunctions = "hidden_main_page_functions"
     private const val KeyAssistantEnabled = "assistant_enabled"
     private const val KeyAssistantLanguage = "assistant_language"
     private const val KeyAssistantApplyMode = "assistant_apply_mode"
@@ -113,6 +115,9 @@ internal object AppPreferencesStore {
             automaticDeviceProfiles = preferences.getBoolean(KeyAutomaticDeviceProfiles, false),
             showDeviceInNotification =
                 preferences.getBoolean(KeyShowDeviceInNotification, true),
+            hiddenMainPageFunctions = hiddenMainPageFunctions(
+                preferences.getStringSet(KeyHiddenMainPageFunctions, emptySet()).orEmpty(),
+            ),
             assistantEnabled = preferences.getBoolean(KeyAssistantEnabled, false),
             assistantConversationalTuning = preferences.getBoolean("assistant_conversational_tuning", false),
             assistantLanguage = AssistantLanguage.English,
@@ -156,11 +161,14 @@ internal object AppPreferencesStore {
     }
 
     fun save(context: Context, preferences: AppPreferences) {
+        val previousHidden = load(context).hiddenMainPageFunctions
         context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
             .edit()
             .putString(KeyTheme, preferences.theme.name)
             .putBoolean(KeyAutomaticDeviceProfiles, preferences.automaticDeviceProfiles)
             .putBoolean(KeyShowDeviceInNotification, preferences.showDeviceInNotification)
+            .putStringSet(KeyHiddenMainPageFunctions,
+                preferences.hiddenMainPageFunctions.map { it.storageKey }.toSet())
             .putBoolean(KeyAssistantEnabled, preferences.assistantEnabled)
             .putBoolean("assistant_conversational_tuning", preferences.assistantConversationalTuning)
             .putString(KeyAssistantLanguage, AssistantLanguage.English.name)
@@ -195,6 +203,10 @@ internal object AppPreferencesStore {
                 preferences.assistantWifiOnlyDownloads,
             )
             .apply()
+        if (previousHidden != preferences.hiddenMainPageFunctions) {
+            // Persist disabled flags so showing an effect later cannot reactivate it.
+            AudioFreedomSettingsStore.save(context, AudioFreedomSettingsStore.load(context))
+        }
     }
 
     fun profileForRoute(context: Context, routeId: String): String? =

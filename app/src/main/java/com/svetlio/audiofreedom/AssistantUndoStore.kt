@@ -11,8 +11,8 @@ internal object AssistantUndoStore {
     fun save(context: Context, settings: AudioFreedomSettings, applied: AudioFreedomSettings? = null) {
         context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
             .edit()
-            .putString(KeySnapshot, settings.toJson().toString())
-            .putString("applied_snapshot", applied?.toJson()?.toString())
+            .putString(KeySnapshot, SettingsSnapshotCodec.encode(settings))
+            .putString("applied_snapshot", applied?.let(SettingsSnapshotCodec::encode))
             .apply()
     }
 
@@ -20,7 +20,7 @@ internal object AssistantUndoStore {
         val raw = context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
             .getString(KeySnapshot, null)
             ?: return null
-        return runCatching { JSONObject(raw).toAudioFreedomSettings() }.getOrNull()
+        return SettingsSnapshotCodec.decode(raw)
     }
 
     fun clear(context: Context) {
@@ -34,9 +34,15 @@ internal object AssistantUndoStore {
     fun conversationalBaseline(context: Context, current: AudioFreedomSettings): AudioFreedomSettings? {
         val raw = context.getSharedPreferences(Preferences, Context.MODE_PRIVATE).getString("applied_snapshot", null)
             ?: return null
-        val applied = runCatching { JSONObject(raw).toAudioFreedomSettings() }.getOrNull()
+        val applied = SettingsSnapshotCodec.decode(raw)
         return if (applied == current) load(context) else null
     }
+}
+
+internal object SettingsSnapshotCodec {
+    fun encode(settings: AudioFreedomSettings): String = settings.toJson().toString()
+    fun decode(raw: String): AudioFreedomSettings? =
+        runCatching { JSONObject(raw).toAudioFreedomSettings() }.getOrNull()
 
     private fun AudioFreedomSettings.toJson() = JSONObject()
         .put("equalizerEnabled", equalizerEnabled)
@@ -61,6 +67,11 @@ internal object AssistantUndoStore {
         .put("reverbDampingPercent", reverbDampingPercent)
         .put("reverbDecayMilliseconds", reverbDecayMilliseconds)
         .put("limiterEnabled", limiterEnabled)
+        .put("volumeLevelerEnabled", volumeLevelerEnabled)
+        .put("levelerTargetMillibels", levelerTargetMillibels)
+        .put("levelerStrengthPercent", levelerStrengthPercent)
+        .put("levelerMaximumBoostMillibels", levelerMaximumBoostMillibels)
+        .put("levelerResponseMilliseconds", levelerResponseMilliseconds)
         .put("limiterThresholdMillibels", limiterThresholdMillibels)
         .put("limiterReleaseMilliseconds", limiterReleaseMilliseconds)
 
@@ -137,6 +148,11 @@ internal object AssistantUndoStore {
                 defaults.reverbDecayMilliseconds,
             ).coerceIn(300, 5000),
             limiterEnabled = optBoolean("limiterEnabled", defaults.limiterEnabled),
+            volumeLevelerEnabled = optBoolean("volumeLevelerEnabled", false),
+            levelerTargetMillibels = optInt("levelerTargetMillibels", -1800).coerceIn(-3000, -1200),
+            levelerStrengthPercent = optInt("levelerStrengthPercent", 50).coerceIn(0, 100),
+            levelerMaximumBoostMillibels = optInt("levelerMaximumBoostMillibels", 600).coerceIn(0, 1200),
+            levelerResponseMilliseconds = optInt("levelerResponseMilliseconds", 1500).coerceIn(200, 5000),
             limiterThresholdMillibels = optInt(
                 "limiterThresholdMillibels",
                 defaults.limiterThresholdMillibels,

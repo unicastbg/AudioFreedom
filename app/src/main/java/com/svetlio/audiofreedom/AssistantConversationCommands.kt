@@ -1,6 +1,6 @@
 package com.svetlio.audiofreedom
 
-internal enum class AssistantHelpTopic { General, Bass, Treble, Mids, Equalizer, Profiles, Effects, Reverb, Immersive, Detail, Undo, Unsupported }
+internal enum class AssistantHelpTopic { General, Bass, Treble, Mids, Equalizer, Profiles, Effects, Reverb, Immersive, Detail, Leveler, Undo, Unsupported }
 
 internal sealed interface AssistantConversationControl {
     data object Cancel : AssistantConversationControl
@@ -29,6 +29,7 @@ internal object AssistantConversationCommands {
         "immersive field" to AssistantHelpTopic.Immersive, "surround" to AssistantHelpTopic.Immersive,
         "обгръщащ звук" to AssistantHelpTopic.Immersive,
         "detail" to AssistantHelpTopic.Detail, "detail recovery" to AssistantHelpTopic.Detail, "детайлност" to AssistantHelpTopic.Detail,
+        "volume leveler" to AssistantHelpTopic.Leveler, "normalizer" to AssistantHelpTopic.Leveler,
         "undo" to AssistantHelpTopic.Undo, "отмяна" to AssistantHelpTopic.Undo)
 
     fun recognize(command: String): AssistantConversationControl? {
@@ -54,6 +55,7 @@ internal object AssistantConversationCommands {
         if (control == AssistantConversationControl.Cancel) return if (bulgarian) "Отказвам командата." else "Command cancelled."
         val topic = (control as AssistantConversationControl.Help).topic
         return if (bulgarian) when (topic) {
+            AssistantHelpTopic.Leveler -> "За Volume Leveler кажете на английски: turn on volume leveler, или turn off volume leveler. Изберете Gentle, Balanced или Night в приложението."
             AssistantHelpTopic.General -> "Мога да променям баса, средите и високите, да включвам ефекти, да зареждам профили и да връщам последната промяна. Опитайте: помощ за баса, или помощ за профилите."
             AssistantHelpTopic.Bass -> "Кажете: добави бас, намали баса, или включи баса. Променям ниските честоти и настройките на баса с малки стъпки."
             AssistantHelpTopic.Treble -> "Кажете: увеличи високите, или намали високите. Можете да комбинирате: увеличи баса и намали високите."
@@ -67,13 +69,14 @@ internal object AssistantConversationCommands {
             AssistantHelpTopic.Undo -> "Кажете: отмени, за да върнете настройките преди последната промяна от асистента. Кажете: отказ, за да прекратите текущата команда."
             AssistantHelpTopic.Unsupported -> "Помагам с настройки на звука, ефекти и профили в AudioFreedom. Не управлявам радио или музикалния плеър. Кажете: помощ, за общите команди."
         } else when (topic) {
+            AssistantHelpTopic.Leveler -> "Say turn on volume leveler or turn off volume leveler. Choose Gentle, Balanced or Night in the app."
             AssistantHelpTopic.General -> "I can adjust bass, mids and treble, control effects, load profiles, or undo the last change. Try bass help, equalizer help, or profiles help."
             AssistantHelpTopic.Bass -> "Say add bass, reduce bass, or turn on bass foundation. I adjust low frequencies and bass settings in small steps."
             AssistantHelpTopic.Treble -> "Say increase treble or lower highs. You can combine changes, such as increase bass and lower treble."
             AssistantHelpTopic.Mids -> "Say increase mids, reduce mids, or clearer vocals. Changes use small steps."
             AssistantHelpTopic.Equalizer -> "Say turn on equalizer, turn off equalizer, add bass, increase mids, or lower treble. You can combine tonal changes."
             AssistantHelpTopic.Profiles -> "Say switch profile to, followed by its exact saved name. I can load existing profiles. Save new profiles in the app."
-            AssistantHelpTopic.Effects -> "I can enable or disable equalizer, bass foundation, detail recovery, immersive field, reverb and output protection. For example, turn on reverb."
+            AssistantHelpTopic.Effects -> "I can enable or disable equalizer, bass foundation, detail recovery, immersive field, reverb, volume leveler and output protection. For example, turn on volume leveler."
             AssistantHelpTopic.Reverb -> "Say add echo, reduce reverb, turn on reverb, or turn off reverb. Echo and reverb refer to the same effect."
             AssistantHelpTopic.Immersive -> "Say turn on immersive field, turn off immersive field, wider stage, or narrower stage."
             AssistantHelpTopic.Detail -> "Say more detail, less detail, turn on detail recovery, or turn off detail recovery."

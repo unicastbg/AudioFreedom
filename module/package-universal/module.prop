@@ -1,6 +1,6 @@
 id=audiofreedom
 name=AudioFreedom Universal Audio Stack
-version=0.9.4-beta
-versionCode=27
+version=0.9.6-beta
+versionCode=36
 author=AudioFreedom
-description=Capability-selected AIDL64, legacy64, or legacy32 DSP integration with reverb and AIDL boot-order recovery.
+description=Capability-selected AIDL64, legacy64, or legacy32 DSP integration with reverb, Volume Leveler, playback analysis, and AIDL boot-order recovery.

@@ -28,8 +28,8 @@ software effect chain.
 
 ## Features
 
-The latest milestone is **0.9.5-beta**. See the
-[release notes](docs/releases/0.9.5-beta.md) for changes since 0.9.4.
+The latest milestone is **0.9.6-beta**. See the
+[release notes](docs/releases/0.9.6-beta.md) for changes since 0.9.5.
 
 - System-wide session-0 processing controlled by a foreground service
 - Ten-band constant-Q equalizer with preamp and persistent presets
@@ -38,10 +38,14 @@ The latest milestone is **0.9.5-beta**. See the
 - Immersive Field with width, center, room, crossfeed, and early-reflection processing
 - Stereo reverb with amount, space, damping, decay, and room presets
 - Linked-channel output limiter with configurable ceiling and release
+- Optional Volume Leveler with Gentle, Balanced, and Night presets for more consistent playback levels
 - Live input, output, and gain-reduction meters
+- On-demand playback analysis with RMS, crest factor, stereo correlation, and a ten-band spectrum
+- Persistent, output-specific A/B snapshots for comparing DSP settings
 - Named profiles with optional automatic assignment by connected output
 - Phone speaker, wired, USB, HDMI, and Bluetooth route awareness in the app and notification
 - System, light, and dark themes
+- Main-page customization: hide unused effects and keep them disabled while retaining their values
 - On-demand update checks against the latest public GitHub release
 - In-app installation, repair, and verified GitHub updates for the driver module
 - Optional on-device assistant with typed commands, offline Whisper push-to-talk,
@@ -79,6 +83,9 @@ See [Reference devices](docs/REFERENCE_DEVICES.md) and
 [Architecture](docs/ARCHITECTURE.md) for integration details and current boundaries.
 The supported typed and spoken phrases are listed in the
 [Voice command guide](docs/VOICE_COMMANDS.md).
+See also [Volume Leveler](docs/VOLUME_LEVELER.md),
+[Playback analysis and A/B comparison](docs/PLAYBACK_ANALYSIS_AND_AB.md), and
+[Main page functions](docs/MAIN_PAGE_FUNCTIONS.md).
 
 ## Repository layout
 

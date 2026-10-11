@@ -1,6 +1,7 @@
 #pragma once
 
 #include "audiofreedom/protocol.h"
+#include "audiofreedom/playback_metrics.h"
 
 #include <array>
 #include <cstddef>
@@ -242,6 +243,60 @@ constexpr WireMessage make_output_metrics(const OutputMetrics& metrics) noexcept
     detail::put_u32(message.payload, 8,
                     static_cast<std::uint32_t>(metrics.gain_reduction_millibels));
     return message;
+}
+
+constexpr WireMessage make_analysis_enabled(bool enabled) noexcept {
+    WireMessage message{.parameter_id = ParameterId::kAnalysisEnabled, .payload_size = 1};
+    message.payload[0] = enabled ? 1 : 0;
+    return message;
+}
+
+constexpr std::optional<bool> read_analysis_enabled(const WireMessage& message) noexcept {
+    if (message.parameter_id != ParameterId::kAnalysisEnabled ||
+        message.payload_size != 1 || message.payload[0] > 1) return std::nullopt;
+    return message.payload[0] != 0;
+}
+
+constexpr WireMessage make_playback_analysis(const audiofreedom::PlaybackAnalysis& value,
+                                           bool spectrum = false) noexcept {
+    WireMessage message{.parameter_id = spectrum ? ParameterId::kPlaybackSpectrum
+                                                : ParameterId::kPlaybackAnalysis,
+                        .payload_size = 24};
+    detail::put_u32(message.payload, 0, value.sequence);
+    if (spectrum) {
+        for (std::size_t i = 0; i < value.bands.size(); ++i)
+            detail::put_u16(message.payload, 4 + 2 * i, static_cast<std::uint16_t>(value.bands[i]));
+    } else {
+        detail::put_u32(message.payload, 4, static_cast<std::uint32_t>(value.input_rms));
+        detail::put_u32(message.payload, 8, static_cast<std::uint32_t>(value.output_rms));
+        detail::put_u32(message.payload, 12, static_cast<std::uint32_t>(value.crest));
+        detail::put_u32(message.payload, 16, static_cast<std::uint32_t>(value.correlation));
+        detail::put_u32(message.payload, 20, value.near_full_scale_ppm);
+    }
+    return message;
+}
+
+constexpr WireMessage make_volume_leveler_configuration(
+        const VolumeLevelerConfiguration& config) noexcept {
+    WireMessage message{.parameter_id = ParameterId::kVolumeLevelerConfiguration,
+                        .payload_size = 20};
+    message.payload[0] = config.enabled ? 1 : 0;
+    detail::put_u32(message.payload, 4, static_cast<std::uint32_t>(config.target_millibels));
+    detail::put_u32(message.payload, 8, config.strength_percent);
+    detail::put_u32(message.payload, 12, config.maximum_boost_millibels);
+    detail::put_u32(message.payload, 16, config.response_milliseconds);
+    return message;
+}
+
+constexpr std::optional<VolumeLevelerConfiguration> read_volume_leveler_configuration(
+        const WireMessage& message) noexcept {
+    if (message.parameter_id != ParameterId::kVolumeLevelerConfiguration ||
+        message.payload_size != 20 || message.payload[0] > 1) return std::nullopt;
+    return VolumeLevelerConfiguration{
+            message.payload[0] == 1,
+            static_cast<std::int32_t>(detail::get_u32(message.payload, 4)),
+            detail::get_u32(message.payload, 8), detail::get_u32(message.payload, 12),
+            detail::get_u32(message.payload, 16)};
 }
 
 constexpr WireMessage make_driver_status(const DriverStatus& status) noexcept {

@@ -575,7 +575,7 @@ private fun AssistantCommandGuide() {
         color = MaterialTheme.colorScheme.onSurfaceVariant)
     AssistantCommandExamples(
         title = "Effects",
-        examples = "Turn on equalizer\nTurn off bass foundation\nTurn on detail recovery\nTurn on immersive field\nTurn on reverb\nTurn off output protection",
+        examples = "Turn on equalizer\nTurn off bass foundation\nTurn on detail recovery\nTurn on immersive field\nTurn on reverb\nTurn on volume leveler\nTurn off volume leveler\nTurn off output protection",
     )
     AssistantCommandExamples(
         title = "Profiles and history",

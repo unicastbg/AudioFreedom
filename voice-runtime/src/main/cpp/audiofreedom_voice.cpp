@@ -96,7 +96,7 @@ Java_com_svetlio_audiofreedom_voice_runtime_LocalWhisperRuntime_nativeTranscribe
     parameters.beam_search.beam_size = 5;
     const char *english_prompt =
         "AudioFreedom sound commands: more bass, less bass, add treble, increase mids, "
-        "clear vocals, less harshness, more detail, wider stage, add echo, reverb, "
+        "clear vocals, less harshness, more detail, wider stage, add echo, reverb, volume leveler, normalizer, "
         "equalizer, immersive field, output protection, "
         "load profile, undo, cancel, help, what can you do, bass help, equalizer help, profiles help.";
     const char *bulgarian_prompt =

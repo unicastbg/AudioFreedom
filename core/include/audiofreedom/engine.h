@@ -4,6 +4,8 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include "audiofreedom/volume_leveler.h"
+#include "audiofreedom/playback_analysis.h"
 
 namespace audiofreedom {
 
@@ -98,6 +100,8 @@ public:
     void set_limiter_release_milliseconds(std::uint32_t milliseconds) noexcept;
     [[nodiscard]] std::uint32_t limiter_release_milliseconds() const noexcept;
     [[nodiscard]] OutputMetrics output_metrics() const noexcept;
+    void set_analysis_enabled(bool enabled) noexcept { analysis_lease_.renew(enabled); }
+    [[nodiscard]] PlaybackAnalysis playback_analysis() const noexcept { return analyzer_.read(); }
 
     void set_dynamic_bass_enabled(bool enabled) noexcept;
     [[nodiscard]] bool dynamic_bass_enabled() const noexcept;
@@ -138,6 +142,9 @@ public:
     [[nodiscard]] std::uint32_t reverb_damping_percent() const noexcept;
     void set_reverb_decay_milliseconds(std::uint32_t milliseconds) noexcept;
     [[nodiscard]] std::uint32_t reverb_decay_milliseconds() const noexcept;
+
+    void set_volume_leveler_configuration(VolumeLevelerConfig config) noexcept;
+    [[nodiscard]] VolumeLevelerConfig volume_leveler_configuration() const noexcept;
 
     // Processes interleaved float PCM in place. No allocation or locking is performed.
     [[nodiscard]] bool process(float* samples, std::size_t frame_count) noexcept;
@@ -208,6 +215,15 @@ private:
     std::array<bool, kEqBandCount> eq_band_active_{};
     std::uint64_t applied_equalizer_revision_ = 0;
     float limiter_gain_ = 1.0F;
+    std::atomic<bool> leveler_enabled_{false};
+    std::atomic<std::int32_t> leveler_target_{-1800};
+    std::atomic<std::uint32_t> leveler_strength_{50};
+    std::atomic<std::uint32_t> leveler_maximum_boost_{600};
+    std::atomic<std::uint32_t> leveler_response_{1500};
+    VolumeLeveler leveler_{};
+    AnalysisLease analysis_lease_{};
+    bool analysis_active_ = false;
+    PlaybackAnalyzer analyzer_{};
     std::array<std::array<float, 2>, kMaxChannelCount> bass_lowpass_states_{};
     std::array<std::array<float, 2>, kMaxChannelCount> bass_deep_lowpass_states_{};
     std::array<float, kMaxChannelCount> bass_harmonic_dc_states_{};

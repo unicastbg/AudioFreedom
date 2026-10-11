@@ -22,7 +22,7 @@ class AudioFreedomProtocolTest {
             byteArrayOf(0x41, 0x46, 0x58, 0x31),
             message.copyOfRange(0, 4),
         )
-        assertArrayEquals(byteArrayOf(1, 0, 6, 0), message.copyOfRange(4, 8))
+        assertArrayEquals(byteArrayOf(1, 0, 8, 0), message.copyOfRange(4, 8))
         assertArrayEquals(byteArrayOf(1, 0x10, 0, 0), message.copyOfRange(8, 12))
         assertArrayEquals(byteArrayOf(0x50, 0xFB.toByte(), 0xFF.toByte(), 0xFF.toByte()),
             message.copyOfRange(16, 20))

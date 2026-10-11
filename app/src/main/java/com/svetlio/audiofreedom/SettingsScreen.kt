@@ -21,6 +21,7 @@ import androidx.compose.material.icons.rounded.DevicesOther
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SystemUpdate
@@ -108,6 +109,7 @@ internal fun SettingsScreen(
     onPreferencesChanged: (AppPreferences) -> Unit,
     onProfileAssigned: (String?) -> Unit,
     onOpenAssistantSettings: () -> Unit,
+    onOpenMainPageSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -323,6 +325,23 @@ internal fun SettingsScreen(
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         SettingsSectionTitle("Appearance")
+        Row(
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenMainPageSettings)
+                .padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Rounded.Tune, contentDescription = null)
+            Column(modifier = Modifier.padding(start = 16.dp).weight(1F)) {
+                Text("Main page functions", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "${MainPageFunction.entries.size - preferences.hiddenMainPageFunctions.size} of " +
+                        "${MainPageFunction.entries.size} shown",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            Icon(Icons.Rounded.ChevronRight, contentDescription = null)
+        }
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             ThemePreference.entries.forEachIndexed { index, theme ->
                 SegmentedButton(

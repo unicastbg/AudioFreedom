@@ -94,6 +94,11 @@ std::atomic<uint32_t> gReverbDampingPercent{
 std::atomic<uint32_t> gReverbDecayMilliseconds{
         audiofreedom::Engine::kDefaultReverbDecayMilliseconds};
 std::atomic<bool> gLimiterEnabled{true};
+std::atomic<bool> gLevelerEnabled{false};
+std::atomic<int32_t> gLevelerTarget{-1800};
+std::atomic<uint32_t> gLevelerStrength{50};
+std::atomic<uint32_t> gLevelerMaximumBoost{600};
+std::atomic<uint32_t> gLevelerResponse{1500};
 std::atomic<int32_t> gLimiterThresholdMillibels{
         audiofreedom::Engine::kDefaultLimiterThresholdMillibels};
 std::atomic<uint32_t> gLimiterReleaseMilliseconds{
@@ -102,6 +107,8 @@ std::atomic<int32_t> gInputPeakMillibels{-12000};
 std::atomic<int32_t> gOutputPeakMillibels{-12000};
 std::atomic<int32_t> gGainReductionMillibels{0};
 std::atomic<uint64_t> gSettingsRevision{1};
+audiofreedom::AnalysisLease gAnalysisLease;
+audiofreedom::AnalysisPublication gAnalysisPublication;
 
 std::optional<audiofreedom::protocol::WireMessage> decodeDirectWire(
         const std::vector<uint8_t>& bytes) {
@@ -319,6 +326,8 @@ void AudioFreedomEffectContext::syncGlobalSettings() {
     mEngine.set_reverb_decay_milliseconds(
             gReverbDecayMilliseconds.load(std::memory_order_acquire));
     mEngine.set_limiter_enabled(gLimiterEnabled.load(std::memory_order_acquire));
+    mEngine.set_volume_leveler_configuration({gLevelerEnabled.load(), gLevelerTarget.load(),
+            gLevelerStrength.load(), gLevelerMaximumBoost.load(), gLevelerResponse.load()});
     mEngine.set_limiter_threshold_millibels(
             gLimiterThresholdMillibels.load(std::memory_order_acquire));
     mEngine.set_limiter_release_milliseconds(
@@ -334,6 +343,17 @@ RetCode AudioFreedomEffectContext::setParams(const std::vector<uint8_t>& params)
 
     using audiofreedom::protocol::ParameterId;
     switch (message->parameter_id) {
+        case ParameterId::kAnalysisEnabled: {
+            const auto value = audiofreedom::protocol::read_analysis_enabled(*message);
+            if (!value) return RetCode::ERROR_ILLEGAL_PARAMETER;
+            mEngine.set_analysis_enabled(*value);
+            if (getSessionId() == 0) {
+                const bool wasActive = gAnalysisLease.active();
+                gAnalysisLease.renew(*value);
+                if (!*value || !wasActive) gAnalysisPublication.publish({});
+            }
+            return RetCode::SUCCESS;
+        }
         case ParameterId::kEnabled: {
             const auto enabled = audiofreedom::protocol::read_enabled(*message);
             if (!enabled.has_value()) {
@@ -570,6 +590,24 @@ RetCode AudioFreedomEffectContext::setParams(const std::vector<uint8_t>& params)
             }
             return RetCode::SUCCESS;
         }
+        case ParameterId::kVolumeLevelerConfiguration: {
+            const auto value = audiofreedom::protocol::read_volume_leveler_configuration(*message);
+            if (!value) return RetCode::ERROR_ILLEGAL_PARAMETER;
+            const audiofreedom::VolumeLevelerConfig config{value->enabled,
+                    value->target_millibels, value->strength_percent,
+                    value->maximum_boost_millibels, value->response_milliseconds};
+            if (!config.valid()) return RetCode::ERROR_ILLEGAL_PARAMETER;
+            mEngine.set_volume_leveler_configuration(config);
+            if (getSessionId() == 0) {
+                gLevelerEnabled.store(config.enabled);
+                gLevelerTarget.store(config.target_millibels);
+                gLevelerStrength.store(config.strength_percent);
+                gLevelerMaximumBoost.store(config.maximum_boost_millibels);
+                gLevelerResponse.store(config.response_milliseconds);
+                gSettingsRevision.fetch_add(1, std::memory_order_acq_rel);
+            }
+            return RetCode::SUCCESS;
+        }
         default:
             return RetCode::ERROR_ILLEGAL_PARAMETER;
     }
@@ -605,6 +643,7 @@ std::optional<std::vector<uint8_t>> AudioFreedomEffectContext::getParams(
         case ParameterId::kDetailRecoveryConfiguration:
         case ParameterId::kImmersiveFieldConfiguration:
         case ParameterId::kReverbConfiguration:
+        case ParameterId::kVolumeLevelerConfiguration:
             return std::nullopt;
         case ParameterId::kDriverStatus: {
             const auto config = mEngine.stream_config();
@@ -629,6 +668,11 @@ std::optional<std::vector<uint8_t>> AudioFreedomEffectContext::getParams(
             };
             return encodeWireResponse(id, audiofreedom::protocol::make_output_metrics(metrics));
         }
+        case ParameterId::kPlaybackAnalysis:
+        case ParameterId::kPlaybackSpectrum:
+            return encodeWireResponse(id, audiofreedom::protocol::make_playback_analysis(
+                    gAnalysisLease.active() ? gAnalysisPublication.read() : audiofreedom::PlaybackAnalysis{},
+                    query->parameter_id == ParameterId::kPlaybackSpectrum));
         default:
             return std::nullopt;
     }
@@ -645,8 +689,16 @@ IEffect::Status AudioFreedomEffectContext::process(float* in, float* out, const 
     }
     syncGlobalSettings();
     mEngine.set_enabled(gProcessingEnabled.load(std::memory_order_acquire));
+    const bool analyze = gAnalysisLease.active();
+    mEngine.set_analysis_enabled(analyze);
+    const auto previousAnalysis = analyze ? mEngine.playback_analysis().sequence : 0;
     if (!mEngine.process(out, static_cast<std::size_t>(samples) / channelCount)) {
         return {EX_ILLEGAL_STATE, 0, 0};
+    }
+    if (analyze) {
+        const auto analysis = mEngine.playback_analysis();
+        if (analysis.sequence != 0 && analysis.sequence != previousAnalysis)
+            gAnalysisPublication.publish(analysis);
     }
     const auto metrics = mEngine.output_metrics();
     gInputPeakMillibels.store(metrics.input_peak_millibels, std::memory_order_release);

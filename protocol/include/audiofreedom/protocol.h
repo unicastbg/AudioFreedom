@@ -8,7 +8,7 @@ namespace audiofreedom::protocol {
 
 inline constexpr std::uint32_t kMagic = 0x31584641;  // "AFX1" in little-endian wire order.
 inline constexpr std::uint16_t kProtocolMajor = 1;
-inline constexpr std::uint16_t kProtocolMinor = 6;
+inline constexpr std::uint16_t kProtocolMinor = 8;
 
 enum class ParameterId : std::uint32_t {
     kProtocolVersion = 0x0000,
@@ -22,8 +22,12 @@ enum class ParameterId : std::uint32_t {
     kDetailRecoveryConfiguration = 0x1400,
     kImmersiveFieldConfiguration = 0x1500,
     kReverbConfiguration = 0x1600,
+    kVolumeLevelerConfiguration = 0x1700,
+    kAnalysisEnabled = 0x1800,
     kDriverStatus = 0x2000,
     kOutputMetrics = 0x2001,
+    kPlaybackAnalysis = 0x2002,
+    kPlaybackSpectrum = 0x2003,
 };
 
 struct EqualizerBandGain final {
@@ -77,6 +81,14 @@ struct OutputMetrics final {
     std::int32_t input_peak_millibels = -12000;
     std::int32_t output_peak_millibels = -12000;
     std::int32_t gain_reduction_millibels = 0;
+};
+
+struct VolumeLevelerConfiguration final {
+    bool enabled = false;
+    std::int32_t target_millibels = -1800;
+    std::uint32_t strength_percent = 50;
+    std::uint32_t maximum_boost_millibels = 600;
+    std::uint32_t response_milliseconds = 1500;
 };
 
 enum class ProcessingState : std::uint32_t {

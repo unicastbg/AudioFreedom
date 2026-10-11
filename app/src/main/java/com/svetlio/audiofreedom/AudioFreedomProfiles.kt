@@ -137,6 +137,11 @@ internal object AudioFreedomProfileStore {
                 limiterEnabled = preferences.getBoolean(
                     key(id, "limiter_enabled"), defaults.limiterEnabled,
                 ),
+                volumeLevelerEnabled = preferences.getBoolean(key(id, "leveler_enabled"), false),
+                levelerTargetMillibels = preferences.getInt(key(id, "leveler_target"), -1800).coerceIn(-3000, -1200),
+                levelerStrengthPercent = preferences.getInt(key(id, "leveler_strength"), 50).coerceIn(0, 100),
+                levelerMaximumBoostMillibels = preferences.getInt(key(id, "leveler_maximum_boost"), 600).coerceIn(0, 1200),
+                levelerResponseMilliseconds = preferences.getInt(key(id, "leveler_response"), 1500).coerceIn(200, 5000),
                 limiterThresholdMillibels = preferences.getInt(
                     key(id, "limiter_threshold"), defaults.limiterThresholdMillibels,
                 ).coerceIn(-600, 0),
@@ -175,6 +180,11 @@ internal object AudioFreedomProfileStore {
         putInt(key(id, "reverb_damping"), settings.reverbDampingPercent)
         putInt(key(id, "reverb_decay"), settings.reverbDecayMilliseconds)
         putBoolean(key(id, "limiter_enabled"), settings.limiterEnabled)
+        putBoolean(key(id, "leveler_enabled"), settings.volumeLevelerEnabled)
+        putInt(key(id, "leveler_target"), settings.levelerTargetMillibels)
+        putInt(key(id, "leveler_strength"), settings.levelerStrengthPercent)
+        putInt(key(id, "leveler_maximum_boost"), settings.levelerMaximumBoostMillibels)
+        putInt(key(id, "leveler_response"), settings.levelerResponseMilliseconds)
         putInt(key(id, "limiter_threshold"), settings.limiterThresholdMillibels)
         putInt(key(id, "limiter_release"), settings.limiterReleaseMilliseconds)
         return this
@@ -205,6 +215,7 @@ internal object AudioFreedomProfileStore {
         "reverb_damping",
         "reverb_decay",
         "limiter_enabled",
+        "leveler_enabled", "leveler_target", "leveler_strength", "leveler_maximum_boost", "leveler_response",
         "limiter_threshold",
         "limiter_release",
     )

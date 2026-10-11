@@ -4,7 +4,7 @@ private const val WireMessageSize = 40
 private const val WireHeaderSize = 16
 private const val Magic = 0x31584641
 private const val ProtocolMajor = 1
-private const val ProtocolMinor = 6
+private const val ProtocolMinor = 8
 private const val ParameterPreamp = 0x1001
 private const val ParameterEqualizerEnabled = 0x1100
 private const val ParameterEqualizerBand = 0x1101
@@ -14,7 +14,11 @@ private const val ParameterDynamicBassConfiguration = 0x1300
 private const val ParameterDetailRecoveryConfiguration = 0x1400
 private const val ParameterImmersiveFieldConfiguration = 0x1500
 private const val ParameterReverbConfiguration = 0x1600
+private const val ParameterVolumeLevelerConfiguration = 0x1700
 private const val ParameterOutputMetrics = 0x2001
+private const val ParameterAnalysisEnabled = 0x1800
+private const val ParameterPlaybackAnalysis = 0x2002
+private const val ParameterPlaybackSpectrum = 0x2003
 
 internal data class AudioOutputMetrics(
     val inputPeakMillibels: Int,
@@ -95,6 +99,44 @@ internal object AudioFreedomProtocol {
         }
 
     fun outputMetricsQuery(): ByteArray = message(ParameterOutputMetrics, 0)
+
+    fun analysisEnabled(enabled: Boolean): ByteArray = message(ParameterAnalysisEnabled, 1).also {
+        it[WireHeaderSize] = if (enabled) 1 else 0
+    }
+
+    fun playbackAnalysisQuery(spectrum: Boolean = false): ByteArray =
+        message(if (spectrum) ParameterPlaybackSpectrum else ParameterPlaybackAnalysis, 0)
+
+    fun readPlaybackAnalysis(metrics: ByteArray, spectrum: ByteArray): PlaybackAnalysis? {
+        fun valid(bytes: ByteArray, parameter: Int): Boolean =
+            bytes.size == WireMessageSize && getInt(bytes, 0) == Magic &&
+                getShort(bytes, 4) == ProtocolMajor && getInt(bytes, 8) == parameter &&
+                getInt(bytes, 12) == 24
+        if (!valid(metrics, ParameterPlaybackAnalysis) || !valid(spectrum, ParameterPlaybackSpectrum))
+            return null
+        val sequence = getInt(metrics, 16)
+        if (sequence == 0 || sequence != getInt(spectrum, 16)) return null
+        val input = getInt(metrics, 20)
+        val output = getInt(metrics, 24)
+        val crest = getInt(metrics, 28)
+        val correlation = getInt(metrics, 32)
+        val nearFullScale = getInt(metrics, 36)
+        val bands = List(EqualizerBandCount) { getShort(spectrum, 20 + 2 * it).toShort().toInt() }
+        if (input !in -12000..12000 || output !in -12000..12000 || crest !in 0..24000 ||
+            (correlation !in -1000..1000 && correlation != 2000) ||
+            nearFullScale !in 0..1000000 || bands.any { it !in -12000..12000 }) return null
+        return PlaybackAnalysis(sequence, input, output, crest,
+            correlation.takeIf { it != 2000 }, nearFullScale, bands)
+    }
+
+    fun volumeLevelerConfiguration(settings: AudioFreedomSettings): ByteArray =
+        message(ParameterVolumeLevelerConfiguration, 20).also { target ->
+            target[WireHeaderSize] = if (settings.volumeLevelerEnabled) 1 else 0
+            putInt(target, WireHeaderSize + 4, settings.levelerTargetMillibels)
+            putInt(target, WireHeaderSize + 8, settings.levelerStrengthPercent)
+            putInt(target, WireHeaderSize + 12, settings.levelerMaximumBoostMillibels)
+            putInt(target, WireHeaderSize + 16, settings.levelerResponseMilliseconds)
+        }
 
     fun readOutputMetrics(message: ByteArray): AudioOutputMetrics? {
         if (message.size != WireMessageSize ||
