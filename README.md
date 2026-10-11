@@ -48,6 +48,7 @@ The latest milestone is **0.9.6-beta**. See the
 - Main-page customization: hide unused effects and keep them disabled while retaining their values
 - On-demand update checks against the latest public GitHub release
 - In-app installation, repair, and verified GitHub updates for the driver module
+- Universal driver module included in the APK for offline installation
 - Optional on-device assistant with typed commands, offline Whisper push-to-talk,
   bounded DSP changes, private feedback, spoken confirmation, and persistent undo
 - English-only assistant commands and readback, with in-app standard-command help
@@ -86,6 +87,39 @@ The supported typed and spoken phrases are listed in the
 See also [Volume Leveler](docs/VOLUME_LEVELER.md),
 [Playback analysis and A/B comparison](docs/PLAYBACK_ANALYSIS_AND_AB.md), and
 [Main page functions](docs/MAIN_PAGE_FUNCTIONS.md).
+
+## Installation
+
+**The APK already includes the universal AudioFreedom driver module (the root-module
+ZIP). You do not need to download the ZIP separately when installing through the app.**
+You still need a rooted Android 15+ device with Magisk, KernelSU, or a compatible
+root-module manager. Back up important data before installing any root module.
+
+1. Download the AudioFreedom APK from [GitHub Releases](https://github.com/unicastbg/AudioFreedom/releases)
+   and install it on your phone.
+2. Open AudioFreedom and go to **Settings > Updates > Driver module**.
+3. Tap **Install**, confirm the installation, and grant AudioFreedom root access when
+   your root manager prompts you. The app installs its included driver ZIP through the
+   detected root-module manager.
+4. Wait for installation to finish successfully, then **reboot your phone**.
+5. Reopen AudioFreedom, confirm that the driver is detected, and enable processing.
+
+Installing the APK alone does not install or activate the driver. The driver installation
+requires root approval, and the reboot is required to activate the module. If root access
+is unavailable, grant it in your root manager and retry.
+
+**Manual alternative:** download the universal driver ZIP from the same release, install
+it using your root-module manager, and reboot. Then install or open the companion APK.
+If the in-app installer cannot use your root manager, use this method instead. Choose
+one installation method; you do not need to install the module twice.
+
+### Upgrading
+
+Install the new APK over the existing app to retain settings, profiles, and downloaded
+assistant packs. Each APK contains its compatible driver package. In
+**Settings > Updates > Driver module**, use **Update** if offered, then reboot after the module update.
+App-only changes may reuse the existing driver, so not every APK update requires a module
+update or reboot. **Reinstall** is available for repairing the installed module.
 
 ## Repository layout
 
