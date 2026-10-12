@@ -12,7 +12,9 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
@@ -54,13 +56,44 @@ internal fun AudioFreedomTheme(
         }
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        shapes = shapesFor(theme),
-        typography = typographyFor(theme),
-        content = content,
-    )
+    CompositionLocalProvider(LocalLayoutStyle provides theme.layoutStyle) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            shapes = shapesFor(theme),
+            typography = typographyFor(theme),
+            content = content,
+        )
+    }
 }
+
+/**
+ * How the main screen is laid out. Classic keeps the original flat list; the other
+ * themes use the redesigned screen (power card, live meters, curve equalizer) with
+ * their own arrangement of the effect sections.
+ */
+internal enum class LayoutStyle {
+    /** Original layout, untouched. */
+    Classic,
+    /** Mocha: two-column effect tiles; tapping a tile opens its controls in a sheet. */
+    Tiles,
+    /** Daylight: one grouped card per effect with an icon badge; expands in place. */
+    Cards,
+    /** Studio: numbered rack rows with LEDs and monospaced readouts. */
+    Rack,
+    ;
+
+    val modern: Boolean get() = this != Classic
+}
+
+internal val AppTheme.layoutStyle: LayoutStyle
+    get() = when (this) {
+        AppTheme.Classic -> LayoutStyle.Classic
+        AppTheme.Mocha -> LayoutStyle.Tiles
+        AppTheme.Daylight -> LayoutStyle.Cards
+        AppTheme.Studio -> LayoutStyle.Rack
+    }
+
+internal val LocalLayoutStyle = staticCompositionLocalOf { LayoutStyle.Classic }
 
 internal fun isDark(mode: ThemePreference, theme: AppTheme, systemDark: Boolean): Boolean =
     if (!theme.supportsLight) {

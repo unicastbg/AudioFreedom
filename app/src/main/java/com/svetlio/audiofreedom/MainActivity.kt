@@ -265,10 +265,13 @@ private fun ControllerScreen(
     var widgetMessage by remember { mutableStateOf<String?>(null) }
 
     val analysisVisible = appPreferences.isVisible(MainPageFunction.PlaybackAnalysis)
-    DisposableEffect(lifecycleOwner, enabled, analysisExpanded, currentPage, analysisVisible) {
+    // The redesigned themes show a live spectrum on the processing card.
+    val heroSpectrum = appPreferences.appTheme.layoutStyle.modern
+    DisposableEffect(lifecycleOwner, enabled, analysisExpanded, currentPage, analysisVisible, heroSpectrum) {
         fun request() {
             AudioFreedomService.requestPlaybackAnalysis(context,
-                enabled && analysisExpanded && analysisVisible && currentPage == ControllerPage.Main &&
+                enabled && (heroSpectrum || analysisExpanded && analysisVisible) &&
+                    currentPage == ControllerPage.Main &&
                     lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
         }
         val observer = LifecycleEventObserver { _, _ -> request() }
@@ -895,6 +898,80 @@ private fun ControllerScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp),
         ) {
+            val layoutStyle = LocalLayoutStyle.current
+            val onProcessingToggle: (Boolean) -> Unit = { requested ->
+                driverState = onProcessingChanged(requested)
+                enabled = requested && (
+                    driverState == DriverState.Attached ||
+                        driverState == DriverState.Detected
+                    )
+            }
+            val currentProfileModified = profiles
+                .firstOrNull { it.id == selectedProfileId }
+                ?.settings
+                ?.let { it != settings } == true
+            val selectProfile: (AudioFreedomProfile) -> Unit = { profile ->
+                profileMenuExpanded = false
+                commitSettings(profile.settings)
+                selectedProfileId = profile.id
+            }
+            val addProfile: () -> Unit = {
+                profileName = ""
+                profileSaveRequest = ProfileSaveRequest(profileId = null)
+            }
+            val saveProfile: () -> Unit = {
+                val selected = profiles.firstOrNull { it.id == selectedProfileId }
+                profileName = selected?.name.orEmpty()
+                profileSaveRequest = ProfileSaveRequest(profileId = selected?.id)
+            }
+            val deleteProfile: () -> Unit = {
+                selectedProfileId?.let { profileId ->
+                    AudioFreedomProfileStore.delete(context, profileId)
+                    if (assignedProfileId == profileId) {
+                        AppPreferencesStore.assignProfile(context, audioRoute.id, null)
+                        assignedProfileId = null
+                    }
+                }
+                selectedProfileId = null
+                profiles = AudioFreedomProfileStore.list(context)
+            }
+            if (layoutStyle.modern) {
+                val effectStates = listOf(
+                    MainPageFunction.Equalizer to settings.equalizerEnabled,
+                    MainPageFunction.ImmersiveField to settings.immersiveFieldEnabled,
+                    MainPageFunction.Reverb to settings.reverbEnabled,
+                    MainPageFunction.VolumeLeveler to settings.volumeLevelerEnabled,
+                    MainPageFunction.DetailRecovery to settings.detailRecoveryEnabled,
+                    MainPageFunction.BassFoundation to settings.dynamicBassEnabled,
+                    MainPageFunction.OutputProtection to settings.limiterEnabled,
+                ).filter { appPreferences.isVisible(it.first) }
+                ProcessingHeroCard(
+                    driverState = driverState,
+                    rootAccessState = rootAccessState,
+                    processing = enabled && driverAvailable,
+                    driverAvailable = driverAvailable,
+                    routeLabel = audioRoute.label,
+                    activeEffects = effectStates.count { it.second },
+                    totalEffects = effectStates.size,
+                    outputPeakMillibels = outputMetrics?.outputPeakMillibels,
+                    gainReductionMillibels = outputMetrics?.gainReductionMillibels,
+                    spectrumMillibels = analysisFrame
+                        ?.takeIf { it.isFresh(analysisNow) }
+                        ?.values
+                        ?.bandsMillibels,
+                    spectrumSupported = analysisSupported,
+                    onProcessingChange = onProcessingToggle,
+                )
+                ProfileChipsRow(
+                    profiles = profiles,
+                    selectedProfileId = selectedProfileId,
+                    profileModified = currentProfileModified,
+                    onProfileSelected = selectProfile,
+                    onAdd = addProfile,
+                    onSave = saveProfile,
+                    onDelete = deleteProfile,
+                )
+            } else {
             DriverStatusRow(driverState, rootAccessState)
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(Modifier.height(24.dp))
@@ -914,13 +991,7 @@ private fun ControllerScreen(
                 Switch(
                     checked = enabled && driverAvailable,
                     enabled = driverAvailable,
-                    onCheckedChange = { requested ->
-                        driverState = onProcessingChanged(requested)
-                        enabled = requested && (
-                            driverState == DriverState.Attached ||
-                                driverState == DriverState.Detected
-                            )
-                    },
+                    onCheckedChange = onProcessingToggle,
                 )
             }
             HorizontalDivider(
@@ -930,39 +1001,16 @@ private fun ControllerScreen(
             ProfileControlRow(
                 profiles = profiles,
                 selectedProfileId = selectedProfileId,
-                profileModified = profiles
-                    .firstOrNull { it.id == selectedProfileId }
-                    ?.settings
-                    ?.let { it != settings } == true,
+                profileModified = currentProfileModified,
                 menuExpanded = profileMenuExpanded,
                 onMenuExpandedChange = { profileMenuExpanded = it },
-                onProfileSelected = { profile ->
-                    profileMenuExpanded = false
-                    commitSettings(profile.settings)
-                    selectedProfileId = profile.id
-                },
-                onAdd = {
-                    profileName = ""
-                    profileSaveRequest = ProfileSaveRequest(profileId = null)
-                },
-                onSave = {
-                    val selected = profiles.firstOrNull { it.id == selectedProfileId }
-                    profileName = selected?.name.orEmpty()
-                    profileSaveRequest = ProfileSaveRequest(profileId = selected?.id)
-                },
-                onDelete = {
-                    selectedProfileId?.let { profileId ->
-                        AudioFreedomProfileStore.delete(context, profileId)
-                        if (assignedProfileId == profileId) {
-                            AppPreferencesStore.assignProfile(context, audioRoute.id, null)
-                            assignedProfileId = null
-                        }
-                    }
-                    selectedProfileId = null
-                    profiles = AudioFreedomProfileStore.list(context)
-                },
+                onProfileSelected = selectProfile,
+                onAdd = addProfile,
+                onSave = saveProfile,
+                onDelete = deleteProfile,
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
             if (appPreferences.isVisible(MainPageFunction.SoundComparison)) {
             SoundComparisonPanel(
                 comparison = comparison,
@@ -1071,7 +1119,30 @@ private fun ControllerScreen(
                 onEnabledChange = { requested ->
                     commitSettings(settings.copy(equalizerEnabled = requested))
                 },
+                preview = {
+                    EqualizerMiniCurve(settings.bandGainsMillibels, settings.equalizerEnabled)
+                },
             ) {
+                if (LocalLayoutStyle.current.modern) {
+                    ModernEqualizerEditor(
+                        bandGains = settings.bandGainsMillibels,
+                        preampMillibels = settings.preampMillibels,
+                        enabled = settings.equalizerEnabled,
+                        selectedPreset = selectedPreset,
+                        onPresetSelected = { preset -> commitSettings(preset.applyTo(settings)) },
+                        onBandChange = { band, gain ->
+                            val gains = settings.bandGainsMillibels.toMutableList()
+                            gains[band] = gain
+                            settings = settings.copy(bandGainsMillibels = gains)
+                            selectedPreset = EqualizerPreset.matching(settings)
+                        },
+                        onPreampChange = { preamp ->
+                            settings = settings.copy(preampMillibels = preamp)
+                            selectedPreset = EqualizerPreset.matching(settings)
+                        },
+                        onCommit = { commitSettings(settings) },
+                    )
+                } else {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
@@ -1135,9 +1206,11 @@ private fun ControllerScreen(
                     )
                 }
                 Spacer(Modifier.height(14.dp))
+                }
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            SectionGap()
             }
+            EffectGroup {
             if (appPreferences.isVisible(MainPageFunction.ImmersiveField)) {
             CollapsibleEffectSection(
                 title = "Immersive field",
@@ -1221,7 +1294,7 @@ private fun ControllerScreen(
                 )
                 Spacer(Modifier.height(14.dp))
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            SectionGap()
             }
             if (appPreferences.isVisible(MainPageFunction.Reverb)) {
             CollapsibleEffectSection(
@@ -1316,7 +1389,7 @@ private fun ControllerScreen(
                 )
                 Spacer(Modifier.height(14.dp))
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            SectionGap()
             }
             if (appPreferences.isVisible(MainPageFunction.VolumeLeveler)) {
             CollapsibleEffectSection(
@@ -1399,7 +1472,7 @@ private fun ControllerScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(14.dp))
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            SectionGap()
             }
             if (appPreferences.isVisible(MainPageFunction.DetailRecovery)) {
             CollapsibleEffectSection(
@@ -1492,7 +1565,7 @@ private fun ControllerScreen(
                 )
                 Spacer(Modifier.height(14.dp))
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            SectionGap()
             }
             if (appPreferences.isVisible(MainPageFunction.BassFoundation)) {
             CollapsibleEffectSection(
@@ -1579,7 +1652,7 @@ private fun ControllerScreen(
                 )
                 Spacer(Modifier.height(14.dp))
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            SectionGap()
             }
             if (appPreferences.isVisible(MainPageFunction.OutputProtection)) {
             CollapsibleEffectSection(
@@ -1635,7 +1708,8 @@ private fun ControllerScreen(
                 )
                 Spacer(Modifier.height(14.dp))
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            SectionGap()
+            }
             }
             Spacer(Modifier.height(24.dp))
             }
@@ -1811,8 +1885,15 @@ private fun CollapsibleEffectSection(
     onExpandedChange: (Boolean) -> Unit,
     enabled: Boolean,
     onEnabledChange: (Boolean) -> Unit,
+    preview: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
+    if (LocalLayoutStyle.current.modern) {
+        ModernEffectSection(
+            title, summary, expanded, onExpandedChange, enabled, onEnabledChange, preview, content,
+        )
+        return
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()

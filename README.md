@@ -72,9 +72,9 @@ mode; Studio is always dark.
 | --- | --- | --- |
 | <img src="docs/images/themes/audiofreedom-theme-mocha-home.png" alt="Mocha theme design preview" width="250"> | <img src="docs/images/themes/audiofreedom-theme-daylight-home.png" alt="Daylight theme design preview" width="250"> | <img src="docs/images/themes/audiofreedom-theme-studio-home.png" alt="Studio theme design preview" width="250"> |
 
-These illustrations show the theme design direction, not device screenshots. The release
-applies the palettes, typography, and shapes to AudioFreedom's existing controls;
-illustrated layouts may differ from the installed app.
+These illustrations show the theme design direction, not device screenshots. Mocha uses
+effect tiles, Daylight uses grouped effect cards, and Studio uses numbered rack rows;
+Classic keeps the original layout. Illustrated details may differ from the installed app.
 
 [Full theme overview](docs/images/themes/audiofreedom-themes-overview.png).
 Equalizer previews: [Mocha](docs/images/themes/audiofreedom-theme-mocha-equalizer.png),
