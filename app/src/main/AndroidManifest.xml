@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -14,6 +15,13 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+        <!--
+            Folder Player, so spoken commands the DSP engine doesn't claim can be handed
+            to it. Without this entry Android 11+ package visibility hides the app and
+            MusicBridge reports it as not installed. Named explicitly rather than by a
+            broad intent query: this is the only app we forward to.
+        -->
+        <package android:name="com.svetlio.mediaplayer" />
     </queries>
 
     <application
@@ -21,6 +29,14 @@
         android:label="AudioFreedom"
         android:supportsRtl="true"
         android:theme="@style/Theme.AudioFreedom">
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.appupdates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/app_update_paths" />
+        </provider>
         <activity
             android:name=".MainActivity"
             android:exported="true">

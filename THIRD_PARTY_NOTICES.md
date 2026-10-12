@@ -14,7 +14,7 @@ License: [Apache License 2.0](LICENSES/Apache-2.0.txt)
 
 ## AndroidX and Jetpack Compose
 
-The companion app uses AndroidX Activity, Core, Material, and Jetpack Compose libraries.
+The companion app uses AndroidX Activity, Core, Material, Media3 Session, and Jetpack Compose libraries.
 These libraries are Copyright The Android Open Source Project and licensed under the
 Apache License 2.0.
 

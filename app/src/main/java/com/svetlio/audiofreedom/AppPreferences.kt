@@ -8,6 +8,21 @@ internal enum class ThemePreference(val label: String) {
     Dark("Dark"),
 }
 
+/**
+ * Visual theme. Independent of [ThemePreference] (light/dark mode): every theme except
+ * Studio has a light and a dark variant and follows that setting.
+ */
+internal enum class AppTheme(
+    val label: String,
+    val summary: String,
+    val supportsLight: Boolean = true,
+) {
+    Classic("Classic", "The original AudioFreedom look"),
+    Mocha("Mocha", "Soft pastels, matches Folder Player"),
+    Daylight("Daylight", "Clean and calm, one coherent green"),
+    Studio("Studio", "Hardware rack with amber accents, always dark", supportsLight = false),
+}
+
 // Legacy values are retained internally but are no longer offered in settings.
 internal enum class AssistantLanguage(val label: String) {
     Automatic("Automatic"),
@@ -52,6 +67,7 @@ internal enum class AssistantVolumeButton(val label: String, val keyCode: Int) {
 
 internal data class AppPreferences(
     val theme: ThemePreference = ThemePreference.System,
+    val appTheme: AppTheme = AppTheme.Classic,
     val automaticDeviceProfiles: Boolean = false,
     val showDeviceInNotification: Boolean = true,
     val hiddenMainPageFunctions: Set<MainPageFunction> = emptySet(),
@@ -75,11 +91,16 @@ internal data class AppPreferences(
     val assistantAskForFeedback: Boolean = true,
     val assistantKeepWarm: AssistantKeepWarm = AssistantKeepWarm.KeepReady,
     val assistantWifiOnlyDownloads: Boolean = true,
+    /**
+     * Pass explicit music requests to Folder Player before DSP interpretation.
+     */
+    val assistantForwardMusicCommands: Boolean = true,
 )
 
 internal object AppPreferencesStore {
     private const val Preferences = "audiofreedom_app"
     private const val KeyTheme = "theme"
+    private const val KeyAppTheme = "app_theme"
     private const val KeyAutomaticDeviceProfiles = "automatic_device_profiles"
     private const val KeyShowDeviceInNotification = "show_device_in_notification"
     private const val KeyHiddenMainPageFunctions = "hidden_main_page_functions"
@@ -96,6 +117,8 @@ internal object AppPreferencesStore {
     private const val KeyAssistantAskForFeedback = "assistant_ask_for_feedback"
     private const val KeyAssistantKeepWarm = "assistant_keep_warm"
     private const val KeyAssistantWifiOnlyDownloads = "assistant_wifi_only_downloads"
+    private const val KeyAssistantForwardMusicCommands =
+        "assistant_forward_music_commands"
     private const val KeyRouteProfilePrefix = "route_profile_"
 
     fun load(context: Context): AppPreferences {
@@ -112,6 +135,7 @@ internal object AppPreferencesStore {
         }.getOrDefault(ThemePreference.System)
         return AppPreferences(
             theme = theme,
+            appTheme = preferences.enumValue(KeyAppTheme, AppTheme.Classic),
             automaticDeviceProfiles = preferences.getBoolean(KeyAutomaticDeviceProfiles, false),
             showDeviceInNotification =
                 preferences.getBoolean(KeyShowDeviceInNotification, true),
@@ -157,6 +181,8 @@ internal object AppPreferencesStore {
             ),
             assistantWifiOnlyDownloads =
                 preferences.getBoolean(KeyAssistantWifiOnlyDownloads, true),
+            assistantForwardMusicCommands =
+                preferences.getBoolean(KeyAssistantForwardMusicCommands, true),
         )
     }
 
@@ -165,6 +191,7 @@ internal object AppPreferencesStore {
         context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
             .edit()
             .putString(KeyTheme, preferences.theme.name)
+            .putString(KeyAppTheme, preferences.appTheme.name)
             .putBoolean(KeyAutomaticDeviceProfiles, preferences.automaticDeviceProfiles)
             .putBoolean(KeyShowDeviceInNotification, preferences.showDeviceInNotification)
             .putStringSet(KeyHiddenMainPageFunctions,
@@ -201,6 +228,10 @@ internal object AppPreferencesStore {
             .putBoolean(
                 KeyAssistantWifiOnlyDownloads,
                 preferences.assistantWifiOnlyDownloads,
+            )
+            .putBoolean(
+                KeyAssistantForwardMusicCommands,
+                preferences.assistantForwardMusicCommands,
             )
             .apply()
         if (previousHidden != preferences.hiddenMainPageFunctions) {

@@ -317,6 +317,18 @@ internal fun AssistantSettingsScreen(
             },
         )
         AssistantSettingsSwitchRow(
+            title = "Pass music commands to Folder Player",
+            summary = "Send play, shuffle and playback commands directly to Folder Player. " +
+                "Music names bypass DSP interpretation. Requires compatible versions " +
+                "of both apps signed with the same certificate.",
+            checked = preferences.assistantForwardMusicCommands,
+            // No point offering it with the player absent; the forward would do nothing.
+            enabled = MusicBridge.isInstalled(LocalContext.current),
+            onCheckedChange = {
+                onPreferencesChanged(preferences.copy(assistantForwardMusicCommands = it))
+            },
+        )
+        AssistantSettingsSwitchRow(
             title = "Pause media while listening",
             summary = "Ask the active player to pause while a voice command is captured",
             checked = preferences.assistantPauseMediaForVoice,
@@ -596,7 +608,12 @@ private fun AssistantCommandGuide() {
     Text("These descriptive requests require the optional language model and Conversational tuning under Experimental features. Model proposals always require review. Half-undo requires an unchanged snapshot of the last assistant sound change.",
         modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Text("Not supported: other languages, radio or music-player controls, creating profiles by voice, automatic headphone calibration, or guaranteed distortion removal.",
+    AssistantCommandExamples(title = "Folder Player music commands",
+        examples = "Play trance\nPlay The Prodigy\nShuffle drum and bass\nNext track\nPause music\nStop music\nMusic help")
+    Text("Requires Folder Player and music forwarding enabled. Music requests execute immediately, without DSP changes or a Yes/No question. Only AudioFreedom initiates this one-way handoff. Say Cancel or Stop listening to cancel listening; Stop music stops playback.",
+        modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text("Not supported: other languages, radio or other music-player controls, creating profiles by voice, automatic headphone calibration, or guaranteed distortion removal.",
         modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant)
     Text(

@@ -442,6 +442,9 @@ internal object AssistantRuntimeManager : AssistantEngine {
 
     override suspend fun plan(request: AssistantRequest): AssistantPlanResult =
         operationMutex.withLock {
+            if (MusicCommandRouting.isMusicCommand(request.command)) {
+                return@withLock AssistantPlanResult.NotUnderstood("Music requests do not use the sound tuning model")
+            }
             val context = checkNotNull(applicationContext) {
                 "Assistant runtime is not initialized"
             }

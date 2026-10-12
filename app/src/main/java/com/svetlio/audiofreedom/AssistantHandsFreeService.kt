@@ -208,7 +208,8 @@ class AssistantHandsFreeService : Service() {
                     return
                 }
                 is AssistantConversationControl.Help -> {
-                    if (!say(AssistantConversationCommands.response(control, replyLanguage), replyLanguage, 30_000L)) return
+                    if (!say(AssistantConversationCommands.response(control, replyLanguage,
+                            preferences.assistantForwardMusicCommands && MusicBridge.isInstalled(this)), replyLanguage, 30_000L)) return
                     helpReplies++
                     if (helpReplies >= AssistantConversationCommands.MaximumHelpReplies) {
                         reply("Help finished. Activate again when ready.", "Помощта приключи. Активирайте отново, когато сте готови.")
@@ -220,6 +221,16 @@ class AssistantHandsFreeService : Service() {
             }
         }
         ensureAvailable()
+        val musicReply = MusicBridge.handleIfMusicCommand(
+            this, transcript, audioSession,
+            enabled = AppPreferencesStore.load(this).assistantForwardMusicCommands,
+            speakReply = preferences.assistantSpeakVoiceConfirmation,
+        )
+        if (musicReply != null) {
+            ensureAvailable()
+            status = musicReply
+            return
+        }
         val base = AudioFreedomSettingsStore.load(this)
         val profiles = AudioFreedomProfileStore.list(this)
         val result = AssistantRuntimeManager.plan(AssistantRequest(transcript, base, profiles,

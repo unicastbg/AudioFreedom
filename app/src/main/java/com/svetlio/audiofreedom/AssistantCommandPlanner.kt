@@ -46,6 +46,9 @@ internal object AssistantCommandPlanner {
         profiles: List<AudioFreedomProfile>,
         maximumBandDeltaMillibels: Int,
     ): AssistantPlanResult {
+        if (MusicCommandRouting.isMusicCommand(command)) {
+            return AssistantPlanResult.NotUnderstood("Music playback is handled by Folder Player, not the DSP planner")
+        }
         AssistantCompoundCommands.plan(command, current, profiles, maximumBandDeltaMillibels)?.let { return it }
         return planSingle(command, current, profiles, maximumBandDeltaMillibels)
     }

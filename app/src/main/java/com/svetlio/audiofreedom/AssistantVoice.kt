@@ -262,6 +262,28 @@ internal class VoiceCommandAudioSession(private val context: Context, private va
     }
     private var holdsAudioFocus = false
     private var manualSession = false
+    private val replyFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+        .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+        .setOnAudioFocusChangeListener { change ->
+            if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                stopSpeaking()
+            }
+        }
+        .build()
+
+    suspend fun speakMusicReply(text: String): SpokenConfirmationResult {
+        releasePlaybackFocus()
+        if (audioManager.mode != AudioManager.MODE_NORMAL) return SpokenConfirmationResult.Failed
+        if (audioManager.requestAudioFocus(replyFocusRequest) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            return SpokenConfirmationResult.Failed
+        }
+        return try {
+            speak(text, AssistantLanguage.English)
+        } finally {
+            audioManager.abandonAudioFocusRequest(replyFocusRequest)
+        }
+    }
 
     @Synchronized
     fun beginManualSession() {
@@ -282,11 +304,16 @@ internal class VoiceCommandAudioSession(private val context: Context, private va
     }
 
     @Synchronized
-    fun restorePlayback() {
+    fun releasePlaybackFocus() {
         if (holdsAudioFocus) {
             audioManager.abandonAudioFocusRequest(focusRequest)
             holdsAudioFocus = false
         }
+    }
+
+    @Synchronized
+    fun restorePlayback() {
+        releasePlaybackFocus()
         if (manualSession) {
             manualSession = false
             VoiceCaptureOwnership.manualSessions.decrementAndGet()
@@ -327,11 +354,15 @@ internal class VoiceCommandAudioSession(private val context: Context, private va
             pendingSpeech.remove(utteranceId)
             return SpokenConfirmationResult.Failed
         }
-        val completed = withTimeoutOrNull(maximumSpeechMilliseconds.coerceIn(1000L, 30_000L)) {
-            completion.await()
-        } ?: false
-        pendingSpeech.remove(utteranceId)
-        if (!completed) textToSpeech.stop()
+        var completed = false
+        try {
+            completed = withTimeoutOrNull(maximumSpeechMilliseconds.coerceIn(1000L, 30_000L)) {
+                completion.await()
+            } ?: false
+        } finally {
+            pendingSpeech.remove(utteranceId)
+            if (!completed) textToSpeech.stop()
+        }
         return if (completed) {
             SpokenConfirmationResult.Spoken
         } else {

@@ -12,8 +12,9 @@ android {
         applicationId = "com.svetlio.audiofreedom"
         minSdk = 35
         targetSdk = 36
-        versionCode = 36
-        versionName = "0.9.6-beta"
+        versionCode = 38
+        versionName = "0.9.7-beta"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -52,12 +53,17 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.core:core-ktx:1.13.1")
+    // Talks to Folder Player's MediaSession to forward music commands the DSP engine
+    // didn't claim. Session client only — no player, no decoders. See MusicBridge.
+    implementation("androidx.media3:media3-session:1.7.1")
     implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")
     implementation(project(":assistant-runtime"))
     implementation(project(":voice-runtime"))
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

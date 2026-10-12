@@ -110,7 +110,11 @@ class VoiceCommandWidgetActivity : ComponentActivity() {
 
         setContent {
             val preferences = AppPreferencesStore.load(this)
-            AudioFreedomTheme(preferences.theme) {
+            AudioFreedomTheme(
+                preferences.theme,
+                preferences.appTheme,
+                controlSystemBars = false,
+            ) {
                 VoiceCommandWidgetPanel(
                     phase = phase,
                     microphoneLevel = microphoneLevel,
@@ -229,12 +233,22 @@ class VoiceCommandWidgetActivity : ComponentActivity() {
             return
         }
 
+        val musicReply = MusicBridge.handleIfMusicCommand(
+            this, transcript, audioSession,
+            enabled = AppPreferencesStore.load(this).assistantForwardMusicCommands,
+            speakReply = preferences.assistantSpeakVoiceConfirmation,
+        )
+        if (musicReply != null) {
+            showMusicResult(musicReply)
+            return
+        }
         val control = AssistantConversationCommands.recognize(transcript)
         if (control != null) {
             val language = HandsFreeVoicePolicy.replyLanguage(preferences.assistantLanguage, transcript)
             pendingProposal = null
             headline = if (control == AssistantConversationControl.Cancel) "Command cancelled" else "Assistant help"
-            detail = AssistantConversationCommands.response(control, language)
+            detail = AssistantConversationCommands.response(control, language,
+                preferences.assistantForwardMusicCommands && MusicBridge.isInstalled(this))
             phase = WidgetVoicePhase.Information
             try {
                 if (preferences.assistantSpeakVoiceConfirmation) {
@@ -381,6 +395,21 @@ class VoiceCommandWidgetActivity : ComponentActivity() {
         detail = message
         microphoneLevel = 0F
         audioSession.restorePlayback()
+    }
+
+    /**
+     * A command the music player took. Information rather than Applied, because nothing
+     * in the DSP changed and there is no undo snapshot to offer — the panel should not
+     * present an Apply or Undo button for something another app did.
+     *
+     * Does not touch audio focus: it has already been released before forwarding, and
+     * grabbing it back here would interrupt the playback we just asked for.
+     */
+    private fun showMusicResult(message: String) {
+        phase = WidgetVoicePhase.Information
+        headline = "Music"
+        detail = message.ifBlank { "Done" }
+        microphoneLevel = 0F
     }
 }
 

@@ -59,7 +59,7 @@ Cancellation phrases also work when answering the confirmation question.
 Say `Help`, `What can you do?`, `Bass help`, `Equalizer help`, `Profiles help`, `Effects help`,
 `Reverb help`, `Immersive field help`, `Detail recovery help`, or `Undo help`.
 Help is brief, English-only, deterministic, and does not use the LLM
-or change any settings. Radio/player control is not supported.
+or change any settings. Say `Music help` for the optional Folder Player handoff.
 
 After a volume-button help reply, the app asks for a command or cancellation and waits using
 the configured speech timeout. Up to three help replies are allowed in one session; the
@@ -75,6 +75,37 @@ While idle, short presses still adjust volume and holds still activate the assis
 Typed commands and the home-screen voice panel also accept help and cancel. The panel shows
 the information without an Apply action; its Close button stops playback. Manual readback
 respects the Speak recognized command setting.
+
+## Folder Player Music Commands
+
+Enable **Pass music commands to Folder Player** in Local assistant settings. This is a
+one-way handoff: AudioFreedom recognizes speech or accepts typed commands and sends music
+requests to Folder Player. Folder Player cannot invoke AudioFreedom's microphone.
+
+Examples: `Play trance`, `Play The Prodigy`, `Shuffle drum and bass`, `Next track`,
+`Previous track`, `Pause music`, `Resume`, and `Stop music`. Say `Music help` for a short
+summary. `Cancel`, bare `Stop`, and `Stop listening` still cancel the assistant session;
+use `Stop music` to stop playback.
+
+Explicit music requests bypass the DSP planner and Qwen, even if an artist or song name
+contains words such as Muddy, Surround, or Clearer. No library index or media metadata is
+sent to a language model. Music commands execute immediately rather than asking for DSP
+confirmation, and do not create a DSP undo snapshot. Sound and music requests cannot be
+combined in one sentence in this version.
+
+Both apps need compatible bridge versions and matching signing certificates. An installed
+but incompatible or differently signed player is reported explicitly. APKs signed by a
+private repository may not match GitHub/development builds; do not uninstall an app merely
+to resolve this without first backing up its data and checking the certificate.
+
+Listening focus is released before forwarding. When spoken replies are enabled, readback
+briefly requests ducking focus and releases it afterward. An offline English Android TTS
+voice is required. Missing voices are reported rather than silently ignored.
+
+Requests have an elapsed-realtime deadline and unique ID. The receiver checks the deadline
+after its library lookup and rejects duplicates. If a reply is lost, AudioFreedom reports
+that playback is unconfirmed, not that execution definitely failed. Check playback before
+retrying. No cloud service or continuous microphone is used.
 
 ## Offline Spoken Replies
 

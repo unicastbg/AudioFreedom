@@ -28,8 +28,8 @@ software effect chain.
 
 ## Features
 
-The latest milestone is **0.9.6-beta**. See the
-[release notes](docs/releases/0.9.6-beta.md) for changes since 0.9.5.
+The latest milestone is **0.9.7-beta**. See the
+[release notes](docs/releases/0.9.7-beta.md) for changes since 0.9.6.
 
 - System-wide session-0 processing controlled by a foreground service
 - Ten-band constant-Q equalizer with preamp and persistent presets
@@ -44,9 +44,10 @@ The latest milestone is **0.9.6-beta**. See the
 - Persistent, output-specific A/B snapshots for comparing DSP settings
 - Named profiles with optional automatic assignment by connected output
 - Phone speaker, wired, USB, HDMI, and Bluetooth route awareness in the app and notification
-- System, light, and dark themes
+- Classic, Mocha, Daylight, and Studio visual themes with System, Light, and Dark modes
 - Main-page customization: hide unused effects and keep them disabled while retaining their values
 - On-demand update checks against the latest public GitHub release
+- Verified in-app APK downloads and Android-confirmed installation, with a separate GitHub link
 - In-app installation, repair, and verified GitHub updates for the driver module
 - Universal driver module included in the APK for offline installation
 - Optional on-device assistant with typed commands, offline Whisper push-to-talk,
@@ -58,7 +59,27 @@ The latest milestone is **0.9.6-beta**. See the
 - Optional offline volume-button voice activation, spoken readback,
   yes/no confirmation, adjustable pause timing, and call suspension
 - Short spoken help, cancellation, and volume-button interruption without changing sound
+- Optional one-way music command forwarding to a compatible, same-signed Folder Player
 - Automatic bypass outside Android's normal audio mode
+
+## Theme Previews
+
+Choose **Settings > Appearance** for the original Classic theme or the new Mocha,
+Daylight, and Studio styles. Classic, Mocha, and Daylight follow System, Light, or Dark
+mode; Studio is always dark.
+
+| Mocha | Daylight | Studio |
+| --- | --- | --- |
+| <img src="docs/images/themes/audiofreedom-theme-mocha-home.png" alt="Mocha theme design preview" width="250"> | <img src="docs/images/themes/audiofreedom-theme-daylight-home.png" alt="Daylight theme design preview" width="250"> | <img src="docs/images/themes/audiofreedom-theme-studio-home.png" alt="Studio theme design preview" width="250"> |
+
+These illustrations show the theme design direction, not device screenshots. The release
+applies the palettes, typography, and shapes to AudioFreedom's existing controls;
+illustrated layouts may differ from the installed app.
+
+[Full theme overview](docs/images/themes/audiofreedom-themes-overview.png).
+Equalizer previews: [Mocha](docs/images/themes/audiofreedom-theme-mocha-equalizer.png),
+[Daylight](docs/images/themes/audiofreedom-theme-daylight-equalizer.png), and
+[Studio](docs/images/themes/audiofreedom-theme-studio-equalizer.png).
 
 ## Compatibility
 
@@ -87,6 +108,8 @@ The supported typed and spoken phrases are listed in the
 See also [Volume Leveler](docs/VOLUME_LEVELER.md),
 [Playback analysis and A/B comparison](docs/PLAYBACK_ANALYSIS_AND_AB.md), and
 [Main page functions](docs/MAIN_PAGE_FUNCTIONS.md).
+See [App and driver updates](docs/APP_UPDATES.md) and
+[One-way music command bridge](docs/MUSIC_BRIDGE.md) for the newer app workflows.
 
 ## Installation
 
@@ -120,6 +143,12 @@ assistant packs. Each APK contains its compatible driver package. In
 **Settings > Updates > Driver module**, use **Update** if offered, then reboot after the module update.
 App-only changes may reuse the existing driver, so not every APK update requires a module
 update or reboot. **Reinstall** is available for repairing the installed module.
+
+From 0.9.7 onward, **Settings > Updates > Check updates** offers **Download**, then
+**Install**, for verified app updates. Android asks you to confirm installation and may
+ask you to allow installs from AudioFreedom. Older versions may open GitHub instead;
+download the APK there once to upgrade to this workflow. App and driver versions can
+differ when the native driver has not changed.
 
 ## Repository layout
 

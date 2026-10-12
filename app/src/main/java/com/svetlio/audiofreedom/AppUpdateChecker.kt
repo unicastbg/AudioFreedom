@@ -11,6 +11,7 @@ internal sealed interface UpdateCheckResult {
     data class UpdateAvailable(
         val version: String,
         val releaseUrl: String,
+        val asset: AppUpdateAsset? = null,
     ) : UpdateCheckResult
 
     data class UpToDate(val latestVersion: String) : UpdateCheckResult
@@ -38,16 +39,7 @@ internal object AppUpdateChecker {
             }
 
             val response = connection.inputStream.bufferedReader().use { it.readText() }
-            val release = JSONObject(response)
-            val tag = release.getString("tag_name")
-            val releaseUrl = release.getString("html_url")
-            val latestVersion = tag.removePrefix("v")
-
-            if (isVersionNewer(latestVersion, currentVersion)) {
-                UpdateCheckResult.UpdateAvailable(latestVersion, releaseUrl)
-            } else {
-                UpdateCheckResult.UpToDate(latestVersion)
-            }
+            parseAppUpdateRelease(JSONObject(response), currentVersion)
         } catch (_: IOException) {
             UpdateCheckResult.Failed
         } catch (_: RuntimeException) {
@@ -56,6 +48,49 @@ internal object AppUpdateChecker {
             connection?.disconnect()
         }
     }
+}
+
+internal const val MaximumAppUpdateBytes = 100L * 1024 * 1024
+
+internal data class AppUpdateAsset(
+    val version: String,
+    val downloadUrl: String,
+    val sha256: String,
+    val sizeBytes: Long,
+)
+
+internal fun isTrustedAppUpdateUrl(value: String, version: String, asset: Boolean): Boolean = runCatching {
+    val url = URL(value)
+    val expected = if (asset) "/unicastbg/AudioFreedom/releases/download/v$version/AudioFreedom-$version.apk"
+        else "/unicastbg/AudioFreedom/releases/tag/v$version"
+    url.protocol == "https" && url.host == "github.com" && url.port == -1 &&
+        url.userInfo == null && url.query == null && url.ref == null && url.path == expected &&
+        SemanticVersion.parse(version) != null
+}.getOrDefault(false)
+
+internal fun parseAppUpdateRelease(release: JSONObject, currentVersion: String): UpdateCheckResult {
+    val version = release.getString("tag_name").removePrefix("v")
+    val releaseUrl = release.getString("html_url")
+    if (release.optBoolean("draft") || release.optBoolean("prerelease") ||
+        SemanticVersion.parse(version) == null || !isTrustedAppUpdateUrl(releaseUrl, version, false)) {
+        return UpdateCheckResult.Failed
+    }
+    if (!isVersionNewer(version, currentVersion)) return UpdateCheckResult.UpToDate(version)
+    val assets = release.optJSONArray("assets")
+    val candidates = buildList {
+        if (assets != null) for (index in 0 until assets.length()) {
+            val candidate = assets.getJSONObject(index)
+            if (candidate.optString("name") == "AudioFreedom-$version.apk") add(candidate)
+        }
+    }
+    val asset = candidates.singleOrNull()?.let { candidate ->
+        val url = candidate.optString("browser_download_url")
+        val hash = parseSha256Digest(candidate.optString("digest"))
+        val size = candidate.optLong("size", -1)
+        if (!isTrustedAppUpdateUrl(url, version, true) || hash == null || size !in 1..MaximumAppUpdateBytes) null
+        else AppUpdateAsset(version, url, hash, size)
+    }
+    return UpdateCheckResult.UpdateAvailable(version, releaseUrl, asset)
 }
 
 internal fun isVersionNewer(candidate: String, current: String): Boolean {

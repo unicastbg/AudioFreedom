@@ -9,7 +9,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -37,13 +36,11 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -106,7 +103,7 @@ class MainActivity : ComponentActivity() {
         }
         Log.i("AudioFreedom", "Driver state: ${initialDriverState.name}")
         setContent {
-            AudioFreedomTheme(appPreferences.theme) {
+            AudioFreedomTheme(appPreferences.theme, appPreferences.appTheme) {
                 ControllerScreen(
                     initialDriverState = initialDriverState,
                     initialEnabled = initialEnabled,
@@ -504,11 +501,22 @@ private fun ControllerScreen(
         assistantFeedbackCandidate = null
         assistantScope.launch {
             try {
+                val musicReply = MusicBridge.handleIfMusicCommand(
+                    context, command, voiceAudioSession,
+                    enabled = appPreferences.assistantForwardMusicCommands,
+                    speakReply = speakBeforeAutomaticApply,
+                )
+                if (musicReply != null) {
+                    assistantProposal = null
+                    assistantMessage = musicReply
+                    return@launch
+                }
                 val control = AssistantConversationCommands.recognize(command)
                 if (control != null) {
                     val language = HandsFreeVoicePolicy.replyLanguage(appPreferences.assistantLanguage, command)
                     assistantProposal = null
-                    assistantMessage = AssistantConversationCommands.response(control, language)
+                    assistantMessage = AssistantConversationCommands.response(control, language,
+                        appPreferences.assistantForwardMusicCommands && MusicBridge.isInstalled(context))
                     if (speakBeforeAutomaticApply) {
                         when (voiceAudioSession.speak(assistantMessage.orEmpty(), language, 30_000L)) {
                             SpokenConfirmationResult.NoSpeechEngine ->
@@ -611,6 +619,8 @@ private fun ControllerScreen(
                         assistantMessage = result.message
                     }
                 }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
             } catch (_: Exception) {
                 assistantProposal = null
                 assistantMessage = "The local assistant could not process that command."
@@ -1978,35 +1988,4 @@ private fun DriverStatusRow(state: DriverState, rootAccessState: RootAccessState
     }
 }
 
-@Composable
-internal fun AudioFreedomTheme(
-    themePreference: ThemePreference,
-    content: @Composable () -> Unit,
-) {
-    val useDarkTheme = when (themePreference) {
-        ThemePreference.System -> isSystemInDarkTheme()
-        ThemePreference.Light -> false
-        ThemePreference.Dark -> true
-    }
-    val colorScheme = if (useDarkTheme) {
-        darkColorScheme(
-            primary = Color(0xFF68DBB7),
-            secondary = Color(0xFFB1CCC1),
-            background = Color(0xFF101412),
-            surface = Color(0xFF101412),
-            onSurface = Color(0xFFE0E4DF),
-        )
-    } else {
-        lightColorScheme(
-            primary = Color(0xFF006B55),
-            secondary = Color(0xFF4E635B),
-            surface = Color(0xFFF7F8F5),
-            background = Color(0xFFF7F8F5),
-            onSurface = Color(0xFF1A1C1A),
-        )
-    }
-    MaterialTheme(
-        colorScheme = colorScheme,
-        content = content,
-    )
-}
+// AudioFreedomTheme now lives in Themes.kt.
