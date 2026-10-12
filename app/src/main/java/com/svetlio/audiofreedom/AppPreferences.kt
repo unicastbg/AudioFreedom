@@ -18,7 +18,7 @@ internal enum class AppTheme(
     val supportsLight: Boolean = true,
 ) {
     Classic("Classic", "The original AudioFreedom look"),
-    Mocha("Mocha", "Soft pastels, matches Folder Player"),
+    Mocha("Mocha", "Soft pastels, matches Media Player"),
     Daylight("Daylight", "Clean and calm, one coherent green"),
     Studio("Studio", "Hardware rack with amber accents, always dark", supportsLight = false),
 }
@@ -92,7 +92,7 @@ internal data class AppPreferences(
     val assistantKeepWarm: AssistantKeepWarm = AssistantKeepWarm.KeepReady,
     val assistantWifiOnlyDownloads: Boolean = true,
     /**
-     * Pass explicit music requests to Folder Player before DSP interpretation.
+     * Pass explicit music requests to Media Player before DSP interpretation.
      */
     val assistantForwardMusicCommands: Boolean = true,
 )

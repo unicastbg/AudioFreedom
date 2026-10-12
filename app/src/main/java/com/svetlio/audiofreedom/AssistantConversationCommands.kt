@@ -31,7 +31,7 @@ internal object AssistantConversationCommands {
         "detail" to AssistantHelpTopic.Detail, "detail recovery" to AssistantHelpTopic.Detail, "детайлност" to AssistantHelpTopic.Detail,
         "volume leveler" to AssistantHelpTopic.Leveler, "normalizer" to AssistantHelpTopic.Leveler,
         "music" to AssistantHelpTopic.Music, "player" to AssistantHelpTopic.Music,
-        "folder player" to AssistantHelpTopic.Music,
+        "media player" to AssistantHelpTopic.Music,
         "undo" to AssistantHelpTopic.Undo, "отмяна" to AssistantHelpTopic.Undo)
 
     fun recognize(command: String): AssistantConversationControl? {
@@ -57,16 +57,16 @@ internal object AssistantConversationCommands {
         if (control == AssistantConversationControl.Cancel) return if (bulgarian) "Отказвам командата." else "Command cancelled."
         val topic = (control as AssistantConversationControl.Help).topic
         if (topic == AssistantHelpTopic.Music) return if (bulgarian) {
-            if (musicEnabled) "За Folder Player кажете на английски: Play trance, Play The Prodigy, Next track, Pause music, или Stop music. Cancel прекратява слушането."
-            else "За музикални команди инсталирайте съвместим Folder Player и включете препращането в настройките."
+            if (musicEnabled) "За Media Player кажете на английски: Play trance, Play The Prodigy, Next track, Pause music, или Stop music. Cancel прекратява слушането."
+            else "За музикални команди инсталирайте съвместим Media Player и включете препращането в настройките."
         } else {
-            if (musicEnabled) "Say play trance, play The Prodigy, shuffle drum and bass, next track, pause music, or stop music. Music requests go to Folder Player immediately. Cancel stops listening."
-            else "Install compatible Folder Player and enable music forwarding in settings to use music commands."
+            if (musicEnabled) "Say play trance, play The Prodigy, shuffle drum and bass, next track, pause music, or stop music. Music requests go to Media Player immediately. Cancel stops listening."
+            else "Install compatible Media Player and enable music forwarding in settings to use music commands."
         }
         if (topic == AssistantHelpTopic.General && musicEnabled) return if (bulgarian) {
-            "Мога да променям звука, да управлявам ефекти, да зареждам профили и да връщам последната промяна. Мога да препращам музикални команди към Folder Player. Кажете: Music help."
+            "Мога да променям звука, да управлявам ефекти, да зареждам профили и да връщам последната промяна. Мога да препращам музикални команди към Media Player. Кажете: Music help."
         } else {
-            "I can adjust bass, mids and treble, control effects, load profiles, undo sound changes, and pass playback requests to Folder Player. Try bass help, profiles help, or music help."
+            "I can adjust bass, mids and treble, control effects, load profiles, undo sound changes, and pass playback requests to Media Player. Try bass help, profiles help, or music help."
         }
         return if (bulgarian) when (topic) {
             AssistantHelpTopic.Music -> error("Handled above")
@@ -97,7 +97,7 @@ internal object AssistantConversationCommands {
             AssistantHelpTopic.Immersive -> "Say turn on immersive field, turn off immersive field, wider stage, or narrower stage."
             AssistantHelpTopic.Detail -> "Say more detail, less detail, turn on detail recovery, or turn off detail recovery."
             AssistantHelpTopic.Undo -> "Say undo to restore settings before the last assistant change. Say cancel to end the current command without undoing anything."
-            AssistantHelpTopic.Unsupported -> if (musicEnabled) "I cannot control a radio or other music players. Say music help for Folder Player commands, or help for sound controls."
+            AssistantHelpTopic.Unsupported -> if (musicEnabled) "I cannot control a radio or other music players. Say music help for Media Player commands, or help for sound controls."
                 else "I help with AudioFreedom sound settings, effects and profiles. I cannot control a radio or music player. Say help for the available commands."
         }
     }

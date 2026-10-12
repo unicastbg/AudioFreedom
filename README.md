@@ -59,7 +59,7 @@ The latest milestone is **0.9.7-beta**. See the
 - Optional offline volume-button voice activation, spoken readback,
   yes/no confirmation, adjustable pause timing, and call suspension
 - Short spoken help, cancellation, and volume-button interruption without changing sound
-- Optional one-way music command forwarding to a compatible, same-signed Folder Player
+- Optional one-way music command forwarding to a compatible, same-signed Media Player
 - Automatic bypass outside Android's normal audio mode
 
 ## Theme Previews

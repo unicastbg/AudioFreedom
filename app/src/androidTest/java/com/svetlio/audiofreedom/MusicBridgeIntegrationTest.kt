@@ -34,7 +34,7 @@ import java.util.UUID
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/** Run once without Folder Player and once with a same-signed bridge-capable APK installed. */
+/** Run once without Media Player and once with a same-signed bridge-capable APK installed. */
 @RunWith(AndroidJUnit4::class)
 class MusicBridgeIntegrationTest {
     private val context: Context get() = InstrumentationRegistry.getInstrumentation().targetContext

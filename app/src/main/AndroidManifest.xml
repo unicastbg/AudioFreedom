@@ -16,7 +16,7 @@
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
         <!--
-            Folder Player, so spoken commands the DSP engine doesn't claim can be handed
+            Media Player, so spoken commands the DSP engine doesn't claim can be handed
             to it. Without this entry Android 11+ package visibility hides the app and
             MusicBridge reports it as not installed. Named explicitly rather than by a
             broad intent query: this is the only app we forward to.

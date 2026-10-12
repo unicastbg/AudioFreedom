@@ -20,7 +20,7 @@ import java.util.UUID
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/** One-way transcript handoff. Only Folder Player interprets music library names. */
+/** One-way transcript handoff. Only Media Player interprets music library names. */
 internal object MusicBridge {
     const val PLAYER_PACKAGE = "com.svetlio.mediaplayer"
     private const val PLAYER_SERVICE = "com.svetlio.mediaplayer.playback.PlaybackService"

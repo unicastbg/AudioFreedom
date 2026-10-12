@@ -34,12 +34,12 @@ internal sealed interface MusicBridgeResult {
 
 internal fun MusicBridgeResult.message(): String = when (this) {
     is MusicBridgeResult.Handled -> reply.ifBlank { "Music command completed." }
-    MusicBridgeResult.Unsupported -> "Folder Player does not support that music command."
-    MusicBridgeResult.Unavailable -> "Folder Player is unavailable. Install or enable it and try again."
-    MusicBridgeResult.Untrusted -> "AudioFreedom and Folder Player must use the same trusted signing certificate."
-    MusicBridgeResult.NeedsPlayerUpdate -> "Update Folder Player to use the music command bridge."
+    MusicBridgeResult.Unsupported -> "Media Player does not support that music command."
+    MusicBridgeResult.Unavailable -> "Media Player is unavailable. Install or enable it and try again."
+    MusicBridgeResult.Untrusted -> "AudioFreedom and Media Player must use the same trusted signing certificate."
+    MusicBridgeResult.NeedsPlayerUpdate -> "Update Media Player to use the music command bridge."
     MusicBridgeResult.Expired -> "The music request expired before execution. No playback change was made."
     MusicBridgeResult.Duplicate -> "That music request was already submitted. Check playback before trying again."
-    MusicBridgeResult.TimedOut -> "Folder Player did not confirm the request in time. Check playback before trying again."
-    MusicBridgeResult.Failed -> "Folder Player could not complete the music request."
+    MusicBridgeResult.TimedOut -> "Media Player did not confirm the request in time. Check playback before trying again."
+    MusicBridgeResult.Failed -> "Media Player could not complete the music request."
 }

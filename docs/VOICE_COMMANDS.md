@@ -59,7 +59,7 @@ Cancellation phrases also work when answering the confirmation question.
 Say `Help`, `What can you do?`, `Bass help`, `Equalizer help`, `Profiles help`, `Effects help`,
 `Reverb help`, `Immersive field help`, `Detail recovery help`, or `Undo help`.
 Help is brief, English-only, deterministic, and does not use the LLM
-or change any settings. Say `Music help` for the optional Folder Player handoff.
+or change any settings. Say `Music help` for the optional Media Player handoff.
 
 After a volume-button help reply, the app asks for a command or cancellation and waits using
 the configured speech timeout. Up to three help replies are allowed in one session; the
@@ -76,11 +76,11 @@ Typed commands and the home-screen voice panel also accept help and cancel. The 
 the information without an Apply action; its Close button stops playback. Manual readback
 respects the Speak recognized command setting.
 
-## Folder Player Music Commands
+## Media Player Music Commands
 
-Enable **Pass music commands to Folder Player** in Local assistant settings. This is a
+Enable **Pass music commands to Media Player** in Local assistant settings. This is a
 one-way handoff: AudioFreedom recognizes speech or accepts typed commands and sends music
-requests to Folder Player. Folder Player cannot invoke AudioFreedom's microphone.
+requests to Media Player. Media Player cannot invoke AudioFreedom's microphone.
 
 Examples: `Play trance`, `Play The Prodigy`, `Shuffle drum and bass`, `Next track`,
 `Previous track`, `Pause music`, `Resume`, and `Stop music`. Say `Music help` for a short

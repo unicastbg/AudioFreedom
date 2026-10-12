@@ -1,8 +1,8 @@
 # One-way Music Command Bridge
 
-Available in AudioFreedom 0.9.7-beta with a compatible Folder Player build. AudioFreedom sends recognized or typed music
-requests to Folder Player's MediaSession. It does not expose a microphone API to the
-player. Folder Player retains its own optional recognition for standalone use.
+Available in AudioFreedom 0.9.7-beta with a compatible Media Player build. AudioFreedom sends recognized or typed music
+requests to Media Player's MediaSession. It does not expose a microphone API to the
+player. Media Player retains its own optional recognition for standalone use.
 
 ## Routing and Replies
 
@@ -48,7 +48,7 @@ using MediaController.releaseFuture, including cancellation/connection races.
 ## Authentication
 
 Both APKs must be signed with the same certificate. AudioFreedom checks the installed
-player certificate before sending text. Folder Player verifies the session caller UID's
+player certificate before sending text. Media Player verifies the session caller UID's
 signer both when granting and when executing the custom commands. No package-name-only
 authorization, root installation, or cloud service is used.
 
@@ -72,4 +72,4 @@ remaining cases with it installed. Scope adb commands to a dedicated emulator se
 
 Device testing is still needed for recognition of actual artist names, audible TTS while
 music plays, Bluetooth routing, volume-button activation, and playback from a populated
-library when Folder Player has no UI open. The emulator suite does not replace those tests.
+library when Media Player has no UI open. The emulator suite does not replace those tests.

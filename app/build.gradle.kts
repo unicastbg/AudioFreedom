@@ -53,7 +53,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.core:core-ktx:1.13.1")
-    // Talks to Folder Player's MediaSession to forward music commands the DSP engine
+    // Talks to Media Player's MediaSession to forward music commands the DSP engine
     // didn't claim. Session client only — no player, no decoders. See MusicBridge.
     implementation("androidx.media3:media3-session:1.7.1")
     implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")
