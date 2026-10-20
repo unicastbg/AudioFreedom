@@ -76,6 +76,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -111,7 +112,6 @@ import kotlin.math.roundToInt
 /** Width of one effect tile when the Tiles style lays effects out in two columns. */
 internal val LocalTileWidth = staticCompositionLocalOf { Dp.Unspecified }
 
-private const val GainRange = 1200 // equalizer bands are ±12 dB, in millibels
 
 // ------------------------------------------------------------------ Processing card
 
@@ -129,8 +129,10 @@ internal fun ProcessingHeroCard(
     spectrumMillibels: List<Int>?,
     spectrumSupported: Boolean?,
     onProcessingChange: (Boolean) -> Unit,
+    outputRmsMillibels: Int? = null,
 ) {
     val style = LocalLayoutStyle.current
+    val look = LocalThemeLook.current
     val colors = MaterialTheme.colorScheme
     val rack = style == LayoutStyle.Rack
     val (statusLabel, statusOk) = when (driverState) {
@@ -140,21 +142,50 @@ internal fun ProcessingHeroCard(
         DriverState.NotInstalled -> "Driver not installed" to false
         DriverState.ProbeFailed -> "Driver check failed" to false
     }
+    val rootLine = when (rootAccessState) {
+        RootAccessState.Checking -> "Checking root access"
+        RootAccessState.Available -> "Root access available"
+        RootAccessState.Unavailable -> "Root denied or unavailable"
+        RootAccessState.NotChecked -> null
+    }
+    if (look.meter == MeterLook.Lcd) {
+        CassetteHero(
+            statusLabel = statusLabel,
+            statusOk = statusOk,
+            rootLine = rootLine,
+            processing = processing,
+            driverAvailable = driverAvailable,
+            routeLabel = routeLabel,
+            activeEffects = activeEffects,
+            totalEffects = totalEffects,
+            peakMillibels = outputPeakMillibels,
+            spectrumMillibels = spectrumMillibels,
+            onProcessingChange = onProcessingChange,
+        )
+        return
+    }
     val okColor = if (style == LayoutStyle.Cards) colors.primary else colors.secondary
     val statusColor = if (statusOk) okColor else colors.error
-    val subtleText = if (style == LayoutStyle.Cards) colors.onPrimaryContainer else colors.onSurfaceVariant
+    // The card layout fills the processing card with the accent's container colour;
+    // flat, glowing and lamp-lit looks use a plain panel (or nothing) instead.
+    val tintedCard = style == LayoutStyle.Cards && !look.flatHero && !look.glow && !look.lamps
+    val subtleText = if (tintedCard) colors.onPrimaryContainer else colors.onSurfaceVariant
 
     Surface(
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         shape = if (rack) MaterialTheme.shapes.large else MaterialTheme.shapes.extraLarge,
-        color = when (style) {
-            LayoutStyle.Cards -> colors.primaryContainer
-            LayoutStyle.Rack -> colors.surfaceContainer
+        color = when {
+            look.flatHero -> Color.Transparent
+            tintedCard -> colors.primaryContainer
+            style == LayoutStyle.Rack -> colors.surfaceContainer
             else -> colors.surfaceContainerLow
         },
-        border = if (style == LayoutStyle.Cards) null else BorderStroke(1.dp, colors.outlineVariant),
+        border = if (tintedCard || look.flatHero) null else BorderStroke(1.dp, colors.outlineVariant),
     ) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(
+            Modifier.padding(if (look.flatHero) 4.dp else 20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1F), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -205,19 +236,30 @@ internal fun ProcessingHeroCard(
                 PowerButton(on = processing, available = driverAvailable, onChange = onProcessingChange)
             }
 
-            SpectrumBars(valuesMillibels = spectrumMillibels, active = processing)
+            when (look.meter) {
+                MeterLook.Trace -> TraceScope(spectrumMillibels, processing)
+                MeterLook.Glow -> GlowSpectrum(spectrumMillibels, processing)
+                MeterLook.Vu -> VuMeter(
+                    rmsMillibels = outputRmsMillibels.takeIf { processing },
+                    peakMillibels = outputPeakMillibels.takeIf { processing },
+                )
+                else -> SpectrumBars(valuesMillibels = spectrumMillibels, active = processing)
+            }
             if (spectrumMillibels == null) {
                 Text(
                     when {
-                        !processing -> "Turn processing on to see the output spectrum"
+                        !processing -> "Turn processing on to see the live meters"
                         spectrumSupported == false -> "This driver doesn't report a spectrum"
-                        else -> "The spectrum appears while audio is playing"
+                        else -> "The meters come alive while audio is playing"
                     },
                     color = subtleText,
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            PeakMeter(peakMillibels = outputPeakMillibels.takeIf { processing })
+            // The VU meter has its own PEAK lamp.
+            if (look.meter != MeterLook.Vu) {
+                PeakMeter(peakMillibels = outputPeakMillibels.takeIf { processing })
+            }
             val reduction = gainReductionMillibels?.takeIf { processing && kotlin.math.abs(it) >= 10 }
             if (reduction != null) {
                 Text(
@@ -237,9 +279,12 @@ internal fun ProcessingHeroCard(
 @Composable
 private fun PowerButton(on: Boolean, available: Boolean, onChange: (Boolean) -> Unit) {
     val colors = MaterialTheme.colorScheme
+    val look = LocalThemeLook.current
     val rack = LocalLayoutStyle.current == LayoutStyle.Rack
+    val ring = look.ringPower
     val shape = if (rack) MaterialTheme.shapes.medium else CircleShape
     val background = when {
+        ring -> Color.Transparent
         !available -> colors.surfaceVariant
         on && rack -> colors.primaryContainer
         on -> colors.primary
@@ -247,17 +292,25 @@ private fun PowerButton(on: Boolean, available: Boolean, onChange: (Boolean) -> 
     }
     val foreground = when {
         !available -> colors.onSurfaceVariant.copy(alpha = 0.6F)
-        on && rack -> colors.primary
+        on && (rack || ring) -> colors.primary
         on -> colors.onPrimary
         else -> colors.onSurfaceVariant
     }
+    val glowing = on && available && (look.glow || look.lamps)
     Box(
         modifier = Modifier
             .size(72.dp)
+            .then(
+                if (glowing) {
+                    Modifier.shadow(16.dp, shape, ambientColor = colors.primary, spotColor = colors.primary)
+                } else {
+                    Modifier
+                },
+            )
             .clip(shape)
             .background(background)
             .then(
-                if (rack) Modifier.border(2.dp, if (on) colors.primary else colors.outline, shape)
+                if (rack || ring) Modifier.border(2.dp, if (on) colors.primary else colors.outline, shape)
                 else Modifier,
             )
             .toggleable(value = on, enabled = available, role = Role.Switch, onValueChange = onChange)
@@ -300,12 +353,45 @@ private fun SpectrumBars(valuesMillibels: List<Int>?, active: Boolean) {
     val low = colors.secondary
     val high = colors.error
     val idle = colors.onSurfaceVariant.copy(alpha = 0.16F)
+    val style = LocalLayoutStyle.current
+    // The driver measures 10 bands. Mocha and Daylight draw more, thinner bars, as in the
+    // mockups, with a smooth curve through the measured bands filling the bars in between.
+    val barCount = when (style) {
+        LayoutStyle.Tiles -> 28
+        LayoutStyle.Cards -> 36
+        else -> count
+    }
     Canvas(
         Modifier
             .fillMaxWidth()
-            .height(56.dp)
+            .height(if (style == LayoutStyle.Cards) 48.dp else 56.dp)
             .semantics { contentDescription = "Output spectrum" },
     ) {
+        if (!rack) {
+            val gap = 3.dp.toPx()
+            val width = (size.width - gap * (barCount - 1)) / barCount
+            val minimum = 3.dp.toPx()
+            val radius = 2.dp.toPx()
+            for (index in 0 until barCount) {
+                val level = bandLevelAt(levels, index, barCount)
+                val x = index * (width + gap)
+                val height = (level * size.height).coerceAtLeast(minimum)
+                val top = size.height - height
+                val color = when {
+                    level <= 0F -> idle
+                    // Mocha's bars fade slightly towards the treble end.
+                    style == LayoutStyle.Tiles -> bar.copy(alpha = (1F - index * 0.02F).coerceAtLeast(0.45F))
+                    else -> bar
+                }
+                drawRoundRect(color, Offset(x, top), Size(width, height), CornerRadius(radius))
+                if (style == LayoutStyle.Cards) {
+                    // Daylight: round only the top corners so the bars stand on a flat base.
+                    val square = minOf(height, radius)
+                    drawRect(color, Offset(x, size.height - square), Size(width, square))
+                }
+            }
+            return@Canvas
+        }
         val gap = 4.dp.toPx()
         val width = (size.width - gap * (count - 1)) / count
         levels.forEachIndexed { index, level ->
@@ -569,12 +655,36 @@ private fun ChoiceChip(
 
 // ------------------------------------------------------------------ Effect sections
 
+/**
+ * Level of bar [index] out of [bars], read off a Catmull-Rom curve through the measured
+ * bands so the in-between bars follow the music smoothly instead of stepping in blocks.
+ */
+internal fun bandLevelAt(levels: List<Float>, index: Int, bars: Int): Float {
+    if (levels.size < 2 || bars < 2) return levels.firstOrNull() ?: 0F
+    val position = index.toFloat() / (bars - 1) * (levels.size - 1)
+    val i = position.toInt().coerceIn(0, levels.size - 2)
+    val t = position - i
+    val p0 = levels[(i - 1).coerceAtLeast(0)]
+    val p1 = levels[i]
+    val p2 = levels[i + 1]
+    val p3 = levels[(i + 2).coerceAtMost(levels.size - 1)]
+    val t2 = t * t
+    val t3 = t2 * t
+    val value = 0.5F * (
+        2F * p1 +
+            (-p0 + p2) * t +
+            (2F * p0 - 5F * p1 + 4F * p2 - p3) * t2 +
+            (-p0 + 3F * p1 - 3F * p2 + p3) * t3
+        )
+    return value.coerceIn(0F, 1F)
+}
+
 /** Spacing between effect sections; replaces Classic's divider lines. */
 @Composable
 internal fun SectionGap() {
     when (LocalLayoutStyle.current) {
         LayoutStyle.Classic -> HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        LayoutStyle.Tiles -> Unit
+        LayoutStyle.Tiles, LayoutStyle.Keys -> Unit
         LayoutStyle.Cards -> Spacer(Modifier.height(10.dp))
         LayoutStyle.Rack -> Spacer(Modifier.height(6.dp))
     }
@@ -584,7 +694,8 @@ internal fun SectionGap() {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun EffectGroup(content: @Composable () -> Unit) {
-    if (LocalLayoutStyle.current == LayoutStyle.Tiles) {
+    val style = LocalLayoutStyle.current
+    if (style == LayoutStyle.Tiles || style == LayoutStyle.Keys) {
         BoxWithConstraints(Modifier.fillMaxWidth().padding(top = 10.dp)) {
             val gap = 10.dp
             // FlowRow rounds spacing upward when deciding whether another item fits.
@@ -624,6 +735,9 @@ internal fun ModernEffectSection(
         )
         LayoutStyle.Rack -> RackRow(
             title, summary, expanded, onExpandedChange, enabled, onEnabledChange, content,
+        )
+        LayoutStyle.Keys -> EffectKey(
+            title, summary, expanded, onExpandedChange, enabled, onEnabledChange, preview, content,
         )
         else -> EffectCard(
             title, summary, expanded, onExpandedChange, enabled, onEnabledChange, content,
@@ -726,11 +840,25 @@ private fun EffectCard(
     content: @Composable () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
+    val look = LocalThemeLook.current
+    val glowing = look.glow && enabled
+    val shape = MaterialTheme.shapes.large
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (glowing) {
+                    Modifier.shadow(10.dp, shape, ambientColor = colors.secondary, spotColor = colors.secondary)
+                } else {
+                    Modifier
+                },
+            ),
+        shape = shape,
         color = colors.surfaceContainerLowest,
-        border = BorderStroke(1.dp, colors.outlineVariant),
+        border = BorderStroke(
+            1.dp,
+            if (glowing) colors.secondary.copy(alpha = 0.6F) else colors.outlineVariant,
+        ),
     ) {
         Column {
             Row(
@@ -741,19 +869,23 @@ private fun EffectCard(
                     .padding(start = 14.dp, end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(MaterialTheme.shapes.medium)
-                        .background(if (enabled) colors.primaryContainer else colors.surfaceVariant),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        effectIcon(title),
-                        contentDescription = null,
-                        tint = if (enabled) colors.primary else colors.onSurfaceVariant,
-                        modifier = Modifier.size(22.dp),
-                    )
+                if (look.lamps) {
+                    PilotLamp(on = enabled)
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(MaterialTheme.shapes.medium)
+                            .background(if (enabled) colors.primaryContainer else colors.surfaceVariant),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            effectIcon(title),
+                            contentDescription = null,
+                            tint = if (enabled) colors.primary else colors.onSurfaceVariant,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
                 }
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1F)) {
@@ -898,7 +1030,7 @@ private fun effectIcon(title: String): ImageVector = when (title) {
 
 /** Small read-only curve shown on the Equalizer tile. */
 @Composable
-internal fun EqualizerMiniCurve(gains: List<Int>, enabled: Boolean) {
+internal fun EqualizerMiniCurve(gains: List<Int>, enabled: Boolean, gainLimit: Int = StandardEqualizerGainLimit) {
     val colors = MaterialTheme.colorScheme
     val line = if (enabled) colors.primary else colors.onSurfaceVariant
     val zero = colors.outlineVariant
@@ -906,7 +1038,7 @@ internal fun EqualizerMiniCurve(gains: List<Int>, enabled: Boolean) {
         val pad = 4.dp.toPx()
         drawLine(zero, Offset(0F, size.height / 2), Offset(size.width, size.height / 2), 1.dp.toPx())
         drawPath(
-            curvePath(gains, pad, inset = 0F),
+            curvePath(gains, pad, inset = 0F, gainLimit = gainLimit),
             line,
             style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round),
         )
@@ -918,6 +1050,7 @@ internal fun ModernEqualizerEditor(
     bandGains: List<Int>,
     preampMillibels: Int,
     enabled: Boolean,
+    gainLimit: Int = StandardEqualizerGainLimit,
     selectedPreset: EqualizerPreset?,
     onPresetSelected: (EqualizerPreset) -> Unit,
     onBandChange: (band: Int, gain: Int) -> Unit,
@@ -954,6 +1087,7 @@ internal fun ModernEqualizerEditor(
             gains = bandGains,
             selected = band,
             enabled = enabled,
+            gainLimit = gainLimit,
             onSelect = { selectedBand = it },
             onBandChange = onBandChange,
             onCommit = onCommit,
@@ -964,6 +1098,7 @@ internal fun ModernEqualizerEditor(
                 BandFader(
                     label = label,
                     gain = bandGains[index],
+                    gainLimit = gainLimit,
                     enabled = enabled,
                     selected = index == band,
                     onSelect = { selectedBand = index },
@@ -979,7 +1114,7 @@ internal fun ModernEqualizerEditor(
         Row(verticalAlignment = Alignment.CenterVertically) {
             FilledTonalIconButton(
                 onClick = {
-                    onBandChange(band, (gain - 50).coerceAtLeast(-GainRange))
+                    onBandChange(band, (gain - 50).coerceAtLeast(-gainLimit))
                     onCommit()
                 },
                 enabled = enabled,
@@ -1001,7 +1136,7 @@ internal fun ModernEqualizerEditor(
             }
             FilledIconButton(
                 onClick = {
-                    onBandChange(band, (gain + 50).coerceAtMost(GainRange))
+                    onBandChange(band, (gain + 50).coerceAtMost(gainLimit))
                     onCommit()
                 },
                 enabled = enabled,
@@ -1025,6 +1160,7 @@ private fun ResponseCurve(
     gains: List<Int>,
     selected: Int,
     enabled: Boolean,
+    gainLimit: Int,
     onSelect: (Int) -> Unit,
     onBandChange: (Int, Int) -> Unit,
     onCommit: () -> Unit,
@@ -1056,7 +1192,7 @@ private fun ResponseCurve(
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.weight(1F),
                 )
-                Text("±12 dB", color = colors.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+                Text("±${gainLimit / 100} dB", color = colors.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
             }
             Canvas(
                 Modifier
@@ -1067,7 +1203,7 @@ private fun ResponseCurve(
                         contentDescription =
                             "Equalizer response curve. Drag a point up or down to change that band."
                     }
-                    .pointerInput(enabled) {
+                    .pointerInput(enabled, gainLimit) {
                         if (!enabled) return@pointerInput
                         var active = 0
                         detectDragGestures(
@@ -1079,7 +1215,7 @@ private fun ResponseCurve(
                             onDragCancel = { commit() },
                             onDrag = { pointer, _ ->
                                 pointer.consume()
-                                change(active, gainAtY(pointer.position.y, size.height.toFloat(), pad))
+                                change(active, gainAtY(pointer.position.y, size.height.toFloat(), pad, gainLimit))
                             },
                         )
                     }
@@ -1090,8 +1226,8 @@ private fun ResponseCurve(
                         }
                     },
             ) {
-                listOf(-1200, -600, 600, 1200).forEach { level ->
-                    val y = gainY(level, pad)
+                listOf(-gainLimit, -gainLimit / 2, gainLimit / 2, gainLimit).forEach { level ->
+                    val y = gainY(level, pad, gainLimit)
                     drawLine(grid, Offset(0F, y), Offset(size.width, y), 1.dp.toPx())
                 }
                 drawLine(zero, Offset(0F, size.height / 2), Offset(size.width, size.height / 2), 1.5.dp.toPx())
@@ -1103,8 +1239,8 @@ private fun ResponseCurve(
                     1.5.dp.toPx(),
                     pathEffect = PathEffect.dashPathEffect(floatArrayOf(6F, 8F)),
                 )
-                val path = curvePath(gains, pad, inset)
-                val area = curvePath(gains, pad, inset).apply {
+                val path = curvePath(gains, pad, inset, gainLimit)
+                val area = curvePath(gains, pad, inset, gainLimit).apply {
                     lineTo(size.width, size.height)
                     lineTo(0F, size.height)
                     close()
@@ -1112,7 +1248,7 @@ private fun ResponseCurve(
                 drawPath(area, curve.copy(alpha = 0.12F))
                 drawPath(path, curve, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
                 gains.forEachIndexed { index, gain ->
-                    val center = Offset(bandX(index, gains.size, inset), gainY(gain, pad))
+                    val center = Offset(bandX(index, gains.size, inset), gainY(gain, pad, gainLimit))
                     if (index == selected) {
                         drawCircle(curve, 9.dp.toPx(), center)
                         drawCircle(handleFill, 9.dp.toPx(), center, style = Stroke(3.dp.toPx()))
@@ -1130,6 +1266,7 @@ private fun ResponseCurve(
 private fun BandFader(
     label: String,
     gain: Int,
+    gainLimit: Int,
     enabled: Boolean,
     selected: Boolean,
     onSelect: () -> Unit,
@@ -1177,29 +1314,29 @@ private fun BandFader(
                     stateDescription = dbText(gain)
                     progressBarRangeInfo = ProgressBarRangeInfo(
                         gain.toFloat(),
-                        -GainRange.toFloat()..GainRange.toFloat(),
-                        47,
+                        -gainLimit.toFloat()..gainLimit.toFloat(),
+                        gainLimit * 2 / 50 - 1,
                     )
                     if (enabled) {
                         setProgress { target ->
-                            change(snapGain(target, -GainRange, GainRange))
+                            change(snapGain(target, -gainLimit, gainLimit))
                             commit()
                             true
                         }
                     }
                 }
-                .pointerInput(enabled) {
+                .pointerInput(enabled, gainLimit) {
                     if (!enabled) return@pointerInput
                     detectVerticalDragGestures(
                         onDragStart = { offset ->
                             select()
-                            change(faderGainAt(offset.y, size.height.toFloat(), pad))
+                            change(faderGainAt(offset.y, size.height.toFloat(), pad, gainLimit))
                         },
                         onDragEnd = { commit() },
                         onDragCancel = { commit() },
                         onVerticalDrag = { pointer, _ ->
                             pointer.consume()
-                            change(faderGainAt(pointer.position.y, size.height.toFloat(), pad))
+                            change(faderGainAt(pointer.position.y, size.height.toFloat(), pad, gainLimit))
                         },
                     )
                 }
@@ -1207,7 +1344,7 @@ private fun BandFader(
         ) {
             val cx = size.width / 2
             val usable = size.height - 2 * pad
-            fun yOf(value: Int) = pad + (1F - (value + GainRange) / (2F * GainRange)) * usable
+            fun yOf(value: Int) = pad + (1F - (value + gainLimit) / (2F * gainLimit)) * usable
             val zeroY = yOf(0)
             val valueY = yOf(gain)
             val trackWidth = if (rack) 3.dp.toPx() else 6.dp.toPx()
@@ -1344,26 +1481,26 @@ private fun bandIndexAt(x: Float, width: Float, inset: Float, count: Int): Int {
     return ((x - inset) / step).roundToInt().coerceIn(0, count - 1)
 }
 
-private fun gainAtY(y: Float, height: Float, pad: Float): Int {
+private fun gainAtY(y: Float, height: Float, pad: Float, gainLimit: Int): Int {
     val half = height / 2F
-    return snapGain((half - y) / (half - pad) * GainRange, -GainRange, GainRange)
+    return snapGain((half - y) / (half - pad) * gainLimit, -gainLimit, gainLimit)
 }
 
-private fun faderGainAt(y: Float, height: Float, pad: Float): Int {
+private fun faderGainAt(y: Float, height: Float, pad: Float, gainLimit: Int): Int {
     val usable = height - 2 * pad
     val fraction = 1F - ((y - pad) / usable).coerceIn(0F, 1F)
-    return snapGain(fraction * 2 * GainRange - GainRange, -GainRange, GainRange)
+    return snapGain(fraction * 2 * gainLimit - gainLimit, -gainLimit, gainLimit)
 }
 
-private fun DrawScope.gainY(gain: Int, pad: Float): Float =
-    size.height / 2F - gain.toFloat() / GainRange * (size.height / 2F - pad)
+private fun DrawScope.gainY(gain: Int, pad: Float, gainLimit: Int): Float =
+    size.height / 2F - gain.toFloat() / gainLimit * (size.height / 2F - pad)
 
 private fun DrawScope.bandX(index: Int, count: Int, inset: Float): Float =
     inset + index * (size.width - 2 * inset) / (count - 1)
 
 /** Smooth curve through the band points, extended flat to both edges. */
-private fun DrawScope.curvePath(gains: List<Int>, pad: Float, inset: Float): Path {
-    val points = gains.mapIndexed { index, gain -> Offset(bandX(index, gains.size, inset), gainY(gain, pad)) }
+private fun DrawScope.curvePath(gains: List<Int>, pad: Float, inset: Float, gainLimit: Int): Path {
+    val points = gains.mapIndexed { index, gain -> Offset(bandX(index, gains.size, inset), gainY(gain, pad, gainLimit)) }
     return Path().apply {
         moveTo(0F, points.first().y)
         lineTo(points.first().x, points.first().y)

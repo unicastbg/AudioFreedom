@@ -8,6 +8,7 @@ import android.util.Log
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -149,6 +150,7 @@ private enum class ControllerPage {
     Settings,
     AssistantSettings,
     MainPageSettings,
+    Themes,
 }
 
 @Composable
@@ -216,6 +218,14 @@ private fun ControllerScreen(
     var profileSaveRequest by remember { mutableStateOf<ProfileSaveRequest?>(null) }
     var profileName by remember { mutableStateOf("") }
     var currentPage by rememberSaveable { mutableStateOf(ControllerPage.Main) }
+    var openDriverUpdates by rememberSaveable { mutableStateOf(false) }
+    var extendedEqDriverUpdateRequired by remember { mutableStateOf(false) }
+    BackHandler(enabled = currentPage != ControllerPage.Main) {
+        currentPage = when (currentPage) {
+            ControllerPage.AssistantSettings, ControllerPage.MainPageSettings, ControllerPage.Themes -> ControllerPage.Settings
+            else -> ControllerPage.Main
+        }
+    }
     var rootAccessState by remember { mutableStateOf(RootAccessState.NotChecked) }
     var diagnosticRefresh by remember { mutableIntStateOf(0) }
     var assistantExpanded by rememberSaveable { mutableStateOf(false) }
@@ -717,6 +727,12 @@ private fun ControllerScreen(
         )
     }
 
+    if (currentPage == ControllerPage.Main) {
+        DriverModuleUpdateNotice(onOpenUpdates = {
+            openDriverUpdates = true
+            currentPage = ControllerPage.Settings
+        }, onModuleChecked = { extendedEqDriverUpdateRequired = needsExtendedEqualizerDriverUpdate(it) })
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -728,6 +744,7 @@ private fun ControllerScreen(
                             Text("Local assistant", fontWeight = FontWeight.SemiBold)
                         ControllerPage.MainPageSettings ->
                             Text("Main page functions", fontWeight = FontWeight.SemiBold)
+                        ControllerPage.Themes -> Text("Themes", fontWeight = FontWeight.SemiBold)
                         ControllerPage.Main -> {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("AudioFreedom", fontWeight = FontWeight.SemiBold)
@@ -742,7 +759,8 @@ private fun ControllerScreen(
                         IconButton(
                             onClick = {
                                 currentPage = if (currentPage == ControllerPage.AssistantSettings ||
-                                    currentPage == ControllerPage.MainPageSettings) {
+                                    currentPage == ControllerPage.MainPageSettings ||
+                                    currentPage == ControllerPage.Themes) {
                                     ControllerPage.Settings
                                 } else {
                                     ControllerPage.Main
@@ -809,6 +827,17 @@ private fun ControllerScreen(
                     currentPage = ControllerPage.AssistantSettings
                 },
                 onOpenMainPageSettings = { currentPage = ControllerPage.MainPageSettings },
+                onOpenThemes = { currentPage = ControllerPage.Themes },
+                openDriverUpdates = openDriverUpdates,
+                onDriverUpdatesShown = { openDriverUpdates = false },
+                modifier = Modifier.padding(contentPadding),
+            )
+            ControllerPage.Themes -> ThemeGalleryScreen(
+                preferences = appPreferences,
+                onPreferencesChanged = {
+                    appPreferences = it
+                    onAppPreferencesChanged(it)
+                },
                 modifier = Modifier.padding(contentPadding),
             )
             ControllerPage.MainPageSettings -> MainPageSettingsScreen(
@@ -961,6 +990,10 @@ private fun ControllerScreen(
                         ?.bandsMillibels,
                     spectrumSupported = analysisSupported,
                     onProcessingChange = onProcessingToggle,
+                    outputRmsMillibels = analysisFrame
+                        ?.takeIf { it.isFresh(analysisNow) }
+                        ?.values
+                        ?.outputRmsMillibels,
                 )
                 ProfileChipsRow(
                     profiles = profiles,
@@ -1120,14 +1153,28 @@ private fun ControllerScreen(
                     commitSettings(settings.copy(equalizerEnabled = requested))
                 },
                 preview = {
-                    EqualizerMiniCurve(settings.bandGainsMillibels, settings.equalizerEnabled)
+                    EqualizerMiniCurve(settings.bandGainsMillibels, settings.equalizerEnabled, settings.equalizerGainLimit)
                 },
             ) {
+                EqualizerRangeControl(
+                    preferences = appPreferences,
+                    driverUpdateRequired = extendedEqDriverUpdateRequired,
+                    onPreferencesChanged = { updated ->
+                        appPreferences = updated
+                        onAppPreferencesChanged(updated)
+                        profiles = AudioFreedomProfileStore.list(context)
+                        comparison = comparison.withEqualizerRange(updated.extendedEqualizerRange)
+                        SoundComparisonStore.save(context, audioRoute.id, comparison)
+                        assistantProposal = null
+                        commitSettings(settings.withEqualizerRange(updated.extendedEqualizerRange))
+                    },
+                )
                 if (LocalLayoutStyle.current.modern) {
                     ModernEqualizerEditor(
                         bandGains = settings.bandGainsMillibels,
                         preampMillibels = settings.preampMillibels,
                         enabled = settings.equalizerEnabled,
+                        gainLimit = settings.equalizerGainLimit,
                         selectedPreset = selectedPreset,
                         onPresetSelected = { preset -> commitSettings(preset.applyTo(settings)) },
                         onBandChange = { band, gain ->
@@ -1195,6 +1242,7 @@ private fun ControllerScreen(
                     EqualizerBandRow(
                         label = label,
                         gainMillibels = settings.bandGainsMillibels[band],
+                        gainLimit = settings.equalizerGainLimit,
                         enabled = settings.equalizerEnabled,
                         onGainChanged = { gain ->
                             val gains = settings.bandGainsMillibels.toMutableList()
@@ -1985,9 +2033,10 @@ private fun OutputMeterRow(label: String, millibels: Int?, isReduction: Boolean 
 }
 
 @Composable
-private fun EqualizerBandRow(
+internal fun EqualizerBandRow(
     label: String,
     gainMillibels: Int,
+    gainLimit: Int,
     enabled: Boolean,
     onGainChanged: (Int) -> Unit,
     onGainCommitted: () -> Unit,
@@ -1999,10 +2048,10 @@ private fun EqualizerBandRow(
         Text(label, modifier = Modifier.width(44.dp), style = MaterialTheme.typography.bodyMedium)
         Slider(
             value = gainMillibels.toFloat(),
-            onValueChange = { onGainChanged(quantizeGain(it, -1200, 1200)) },
+            onValueChange = { onGainChanged(quantizeGain(it, -gainLimit, gainLimit)) },
             onValueChangeFinished = onGainCommitted,
-            valueRange = -1200F..1200F,
-            steps = 47,
+            valueRange = -gainLimit.toFloat()..gainLimit.toFloat(),
+            steps = gainLimit * 2 / 50 - 1,
             enabled = enabled,
             modifier = Modifier.weight(1F),
         )

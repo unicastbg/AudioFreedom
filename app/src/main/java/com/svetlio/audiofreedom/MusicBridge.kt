@@ -55,10 +55,12 @@ internal object MusicBridge {
         if (!MusicCommandRouting.isMusicCommand(transcript)) return null
         // Return focus without releasing the manual voice-session ownership guard.
         audioSession.releasePlaybackFocus()
-        val message = if (enabled) send(context, MusicCommandRouting.transcript(transcript)).message()
-            else "Music command forwarding is turned off in AudioFreedom settings."
+        val result = if (enabled) send(context, MusicCommandRouting.transcript(transcript)) else null
+        val message = result?.message() ?: "Music command forwarding is turned off in AudioFreedom settings."
         if (!speakReply) return message
-        return message + when (audioSession.speakMusicReply(message)) {
+        val spokenMessage = result?.spokenMessage(AppPreferencesStore.load(context).assistantDetailedMusicReplies)
+            ?: message
+        return message + when (audioSession.speakMusicReply(spokenMessage)) {
             SpokenConfirmationResult.Spoken -> ""
             SpokenConfirmationResult.NoSpeechEngine -> " No Android text-to-speech engine is installed or enabled."
             SpokenConfirmationResult.NoOfflineVoice -> " No offline English speech voice is installed."

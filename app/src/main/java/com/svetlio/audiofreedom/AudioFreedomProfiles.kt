@@ -16,9 +16,11 @@ internal object AudioFreedomProfileStore {
 
     fun list(context: Context): List<AudioFreedomProfile> {
         val preferences = context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
+        val extended = AppPreferencesStore.load(context).extendedEqualizerRange
         return preferences.getStringSet(KeyProfileIds, emptySet())
             .orEmpty()
             .mapNotNull { id -> readProfile(preferences, id) }
+            .map { it.copy(settings = it.settings.withEqualizerRange(extended)) }
             .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
     }
 
@@ -30,6 +32,7 @@ internal object AudioFreedomProfileStore {
     ): AudioFreedomProfile {
         val normalizedName = name.trim()
         require(normalizedName.isNotEmpty())
+        val settings = settings.withEqualizerRange(AppPreferencesStore.load(context).extendedEqualizerRange)
 
         val preferences = context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
         val existingProfiles = preferences.getStringSet(KeyProfileIds, emptySet()).orEmpty()
@@ -78,7 +81,8 @@ internal object AudioFreedomProfileStore {
                     key(id, "preamp"), defaults.preampMillibels,
                 ).coerceIn(-2400, 0),
                 bandGainsMillibels = List(EqualizerBandCount) { band ->
-                    preferences.getInt(key(id, "band_$band"), 0).coerceIn(-1200, 1200)
+                    preferences.getInt(key(id, "band_$band"), 0)
+                        .coerceIn(-ExtendedEqualizerGainLimit, ExtendedEqualizerGainLimit)
                 },
                 dynamicBassEnabled = preferences.getBoolean(
                     key(id, "bass_enabled"), defaults.dynamicBassEnabled,

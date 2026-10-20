@@ -28,11 +28,11 @@ software effect chain.
 
 ## Features
 
-The latest milestone is **0.9.7-beta**. See the
-[release notes](docs/releases/0.9.7-beta.md) for changes since 0.9.6.
+The latest milestone is **0.9.8-beta**. See the
+[release notes](docs/releases/0.9.8-beta.md) for changes since 0.9.7.
 
 - System-wide session-0 processing controlled by a foreground service
-- Ten-band constant-Q equalizer with preamp and persistent presets
+- Ten-band constant-Q equalizer with preamp, persistent presets, and an optional +/-20 dB range unlock
 - Bass Foundation with deep-band lift, adaptive restraint, and small-driver support
 - Transient-aware Detail Recovery with linked stereo decisions
 - Immersive Field with width, center, room, crossfeed, and early-reflection processing
@@ -44,12 +44,13 @@ The latest milestone is **0.9.7-beta**. See the
 - Persistent, output-specific A/B snapshots for comparing DSP settings
 - Named profiles with optional automatic assignment by connected output
 - Phone speaker, wired, USB, HDMI, and Bluetooth route awareness in the app and notification
-- Classic, Mocha, Daylight, and Studio visual themes with System, Light, and Dark modes
+- Twelve visual themes with a preview gallery and System, Light, and Dark modes where supported
 - Main-page customization: hide unused effects and keep them disabled while retaining their values
 - On-demand update checks against the latest public GitHub release
 - Verified in-app APK downloads and Android-confirmed installation, with a separate GitHub link
 - In-app installation, repair, and verified GitHub updates for the driver module
 - Universal driver module included in the APK for offline installation
+- One-time outdated-driver reminder and a confirmed restart offer after module installation
 - Optional on-device assistant with typed commands, offline Whisper push-to-talk,
   bounded DSP changes, private feedback, spoken confirmation, and persistent undo
 - English-only assistant commands and readback, with in-app standard-command help
@@ -64,9 +65,14 @@ The latest milestone is **0.9.7-beta**. See the
 
 ## Theme Previews
 
-Choose **Settings > Appearance** for the original Classic theme or the new Mocha,
-Daylight, and Studio styles. Classic, Mocha, and Daylight follow System, Light, or Dark
-mode; Studio is always dark.
+Open **Settings > Themes** to browse previews and apply a theme. Choose Classic,
+Mocha, Daylight, Studio, Dynamic, Media Player, OLED Black, Phosphor, Paper, Valve,
+Neon, or Cassette Deck. Mode controls stay visible while scrolling. Classic, Mocha,
+Daylight, and Dynamic follow System, Light, or Dark mode; the other themes use their
+intended fixed shade.
+
+Valve features an RMS-driven analog-style VU meter. Cassette Deck includes a visible
+cassette, signal-driven reels, amber meters, and a working processing power key.
 
 | Mocha | Daylight | Studio |
 | --- | --- | --- |
@@ -141,6 +147,9 @@ one installation method; you do not need to install the module twice.
 Install the new APK over the existing app to retain settings, profiles, and downloaded
 assistant packs. Each APK contains its compatible driver package. In
 **Settings > Updates > Driver module**, use **Update** if offered, then reboot after the module update.
+After successful installation, AudioFreedom offers **Restart now** and keeps the
+restart-required status until the next boot. Version 0.9.8 requires its updated driver
+module for EQ gains beyond +/-12 dB; install the bundled module and restart once.
 App-only changes may reuse the existing driver, so not every APK update requires a module
 update or reboot. **Reinstall** is available for repairing the installed module.
 

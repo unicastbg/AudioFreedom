@@ -31,6 +31,10 @@ internal data class SoundComparison(
     }
 }
 
+internal fun SoundComparison.withEqualizerRange(extended: Boolean): SoundComparison = copy(
+    a = a?.withEqualizerRange(extended), b = b?.withEqualizerRange(extended),
+)
+
 internal object SoundComparisonStore {
     private const val Preferences = "audiofreedom_sound_comparison"
 
@@ -42,6 +46,7 @@ internal object SoundComparisonStore {
             ComparisonSlot.entries.firstOrNull { it.name == name }
         }
         return SoundComparison(read("a"), read("b"), preferred)
+            .withEqualizerRange(AppPreferencesStore.load(context).extendedEqualizerRange)
     }
 
     fun save(context: Context, route: String, value: SoundComparison) {

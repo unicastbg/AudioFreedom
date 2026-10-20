@@ -12,8 +12,8 @@ android {
         applicationId = "com.svetlio.audiofreedom"
         minSdk = 35
         targetSdk = 36
-        versionCode = 39
-        versionName = "0.9.7-beta"
+        versionCode = 43
+        versionName = "0.9.8-beta"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -46,6 +46,7 @@ android {
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.09.03")
     implementation(composeBom)
+    androidTestImplementation(composeBom)
 
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.compose.material:material-icons-extended")
@@ -64,6 +65,10 @@ dependencies {
     testImplementation("org.json:json:20240303")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    // Android 16 removed the InputManager method used by older Espresso releases.
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

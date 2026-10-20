@@ -8,19 +8,29 @@ internal enum class ThemePreference(val label: String) {
     Dark("Dark"),
 }
 
+/** Which shades a theme comes in. Only [Both] follows the light/dark mode setting. */
+internal enum class ThemeModes { Both, DarkOnly, LightOnly }
+
 /**
- * Visual theme. Independent of [ThemePreference] (light/dark mode): every theme except
- * Studio has a light and a dark variant and follows that setting.
+ * Visual theme. Independent of [ThemePreference] (light/dark mode), which only applies
+ * to themes that come in both shades. Entry names are persisted: never rename one.
  */
 internal enum class AppTheme(
     val label: String,
-    val summary: String,
-    val supportsLight: Boolean = true,
+    val modes: ThemeModes = ThemeModes.Both,
 ) {
-    Classic("Classic", "The original AudioFreedom look"),
-    Mocha("Mocha", "Soft pastels, matches Media Player"),
-    Daylight("Daylight", "Clean and calm, one coherent green"),
-    Studio("Studio", "Hardware rack with amber accents, always dark", supportsLight = false),
+    Classic("Classic"),
+    Mocha("Mocha"),
+    Daylight("Daylight"),
+    Studio("Studio", ThemeModes.DarkOnly),
+    Dynamic("Dynamic"),
+    MediaPlayer("Media Player", ThemeModes.DarkOnly),
+    OledBlack("OLED Black", ThemeModes.DarkOnly),
+    Phosphor("Phosphor", ThemeModes.DarkOnly),
+    Paper("Paper", ThemeModes.LightOnly),
+    Valve("Valve", ThemeModes.DarkOnly),
+    Neon("Neon", ThemeModes.DarkOnly),
+    CassetteDeck("Cassette Deck", ThemeModes.LightOnly),
 }
 
 // Legacy values are retained internally but are no longer offered in settings.
@@ -95,6 +105,9 @@ internal data class AppPreferences(
      * Pass explicit music requests to Media Player before DSP interpretation.
      */
     val assistantForwardMusicCommands: Boolean = true,
+    val assistantDetailedMusicReplies: Boolean = false,
+    val extendedEqualizerRange: Boolean = false,
+    val extendedEqualizerRangeAcknowledged: Boolean = false,
 )
 
 internal object AppPreferencesStore {
@@ -119,6 +132,7 @@ internal object AppPreferencesStore {
     private const val KeyAssistantWifiOnlyDownloads = "assistant_wifi_only_downloads"
     private const val KeyAssistantForwardMusicCommands =
         "assistant_forward_music_commands"
+    private const val KeyAssistantDetailedMusicReplies = "assistant_detailed_music_replies"
     private const val KeyRouteProfilePrefix = "route_profile_"
 
     fun load(context: Context): AppPreferences {
@@ -183,11 +197,17 @@ internal object AppPreferencesStore {
                 preferences.getBoolean(KeyAssistantWifiOnlyDownloads, true),
             assistantForwardMusicCommands =
                 preferences.getBoolean(KeyAssistantForwardMusicCommands, true),
+            assistantDetailedMusicReplies =
+                preferences.getBoolean(KeyAssistantDetailedMusicReplies, false),
+            extendedEqualizerRange = preferences.getBoolean("extended_eq_range", false) &&
+                preferences.getBoolean("extended_eq_range_acknowledged", false),
+            extendedEqualizerRangeAcknowledged = preferences.getBoolean("extended_eq_range_acknowledged", false),
         )
     }
 
     fun save(context: Context, preferences: AppPreferences) {
-        val previousHidden = load(context).hiddenMainPageFunctions
+        val previous = load(context)
+        val previousHidden = previous.hiddenMainPageFunctions
         context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
             .edit()
             .putString(KeyTheme, preferences.theme.name)
@@ -233,10 +253,17 @@ internal object AppPreferencesStore {
                 KeyAssistantForwardMusicCommands,
                 preferences.assistantForwardMusicCommands,
             )
+            .putBoolean(KeyAssistantDetailedMusicReplies, preferences.assistantDetailedMusicReplies)
+            .putBoolean("extended_eq_range", preferences.extendedEqualizerRange && preferences.extendedEqualizerRangeAcknowledged)
+            .putBoolean("extended_eq_range_acknowledged", preferences.extendedEqualizerRangeAcknowledged)
             .apply()
-        if (previousHidden != preferences.hiddenMainPageFunctions) {
-            // Persist disabled flags so showing an effect later cannot reactivate it.
+        if (previousHidden != preferences.hiddenMainPageFunctions ||
+            previous.extendedEqualizerRange != preferences.extendedEqualizerRange) {
+            // Persist visibility and range caps so re-enabling cannot restore old values.
             AudioFreedomSettingsStore.save(context, AudioFreedomSettingsStore.load(context))
+        }
+        if (previous.extendedEqualizerRange != preferences.extendedEqualizerRange) {
+            AssistantUndoStore.clear(context)
         }
     }
 

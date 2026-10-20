@@ -5,7 +5,7 @@ import org.junit.Test
 
 class ThemesTest {
     @Test fun ordinaryThemesFollowTheChosenMode() {
-        for (theme in listOf(AppTheme.Classic, AppTheme.Mocha, AppTheme.Daylight)) {
+        for (theme in AppTheme.entries.filter { it.modes == ThemeModes.Both }) {
             assertFalse(isDark(ThemePreference.Light, theme, true))
             assertTrue(isDark(ThemePreference.Dark, theme, false))
             assertFalse(isDark(ThemePreference.System, theme, false))
@@ -13,21 +13,32 @@ class ThemesTest {
         }
     }
 
-    @Test fun studioIsAlwaysDark() {
+    @Test fun fixedShadeThemesIgnoreTheChosenMode() {
+        val darkThemes = listOf(AppTheme.Studio, AppTheme.MediaPlayer, AppTheme.OledBlack,
+            AppTheme.Phosphor, AppTheme.Valve, AppTheme.Neon)
+        val lightThemes = listOf(AppTheme.Paper, AppTheme.CassetteDeck)
         for (mode in ThemePreference.entries) for (systemDark in listOf(false, true)) {
-            assertTrue(isDark(mode, AppTheme.Studio, systemDark))
+            for (theme in darkThemes) assertTrue(theme.label, isDark(mode, theme, systemDark))
+            for (theme in lightThemes) assertFalse(theme.label, isDark(mode, theme, systemDark))
         }
     }
 
-    @Test fun pickerSwatchesMatchTheThemePalette() {
-        for (theme in AppTheme.entries) for (dark in listOf(false, true)) {
-            val scheme = colorSchemeFor(theme, dark || !theme.supportsLight)
-            assertEquals(listOf(scheme.background, scheme.surfaceContainerHighest, scheme.primary), themeSwatch(theme, dark))
-        }
+    @Test fun specializedThemesSelectTheirMetersAndLayouts() {
+        assertEquals(MeterLook.Trace, AppTheme.Phosphor.look.meter)
+        assertEquals(MeterLook.Vu, AppTheme.Valve.look.meter)
+        assertEquals(MeterLook.Glow, AppTheme.Neon.look.meter)
+        assertEquals(MeterLook.Lcd, AppTheme.CassetteDeck.look.meter)
+        assertEquals(LayoutStyle.Keys, AppTheme.CassetteDeck.layoutStyle)
+        assertEquals(LayoutStyle.Classic, AppTheme.Classic.layoutStyle)
+        assertTrue(AppTheme.entries.filter { it != AppTheme.Classic }.all { it.layoutStyle.modern })
     }
 
-    @Test fun themesOfferDistinctPalettes() {
-        assertEquals(AppTheme.entries.size, AppTheme.entries.map { themeSwatch(it, true) }.toSet().size)
-        assertEquals(themeSwatch(AppTheme.Studio, true), themeSwatch(AppTheme.Studio, false))
+    @Test fun newFixedPalettesAreDistinctAndOledUsesTrueBlack() {
+        val palettes = listOf(MediaPlayerDark, OledBlackDark, PhosphorDark,
+            PaperLight, ValveDark, NeonDark, CassetteLight)
+        assertEquals(palettes.size, palettes.map {
+            listOf(it.background, it.surfaceContainerHighest, it.primary)
+        }.toSet().size)
+        assertEquals(androidx.compose.ui.graphics.Color.Black, OledBlackDark.background)
     }
 }

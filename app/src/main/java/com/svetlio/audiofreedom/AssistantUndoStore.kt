@@ -21,6 +21,7 @@ internal object AssistantUndoStore {
             .getString(KeySnapshot, null)
             ?: return null
         return SettingsSnapshotCodec.decode(raw)
+            ?.withEqualizerRange(AppPreferencesStore.load(context).extendedEqualizerRange)
     }
 
     fun clear(context: Context) {
@@ -46,6 +47,7 @@ internal object SettingsSnapshotCodec {
 
     private fun AudioFreedomSettings.toJson() = JSONObject()
         .put("equalizerEnabled", equalizerEnabled)
+        .put("extendedEqualizerRange", extendedEqualizerRange)
         .put("preampMillibels", preampMillibels)
         .put("bandGainsMillibels", JSONArray(bandGainsMillibels))
         .put("dynamicBassEnabled", dynamicBassEnabled)
@@ -78,12 +80,15 @@ internal object SettingsSnapshotCodec {
     private fun JSONObject.toAudioFreedomSettings(): AudioFreedomSettings {
         val defaults = AudioFreedomSettings()
         val bands = optJSONArray("bandGainsMillibels")
+        val extended = optBoolean("extendedEqualizerRange", false)
+        val gainLimit = if (extended) ExtendedEqualizerGainLimit else StandardEqualizerGainLimit
         return AudioFreedomSettings(
             equalizerEnabled = optBoolean("equalizerEnabled", defaults.equalizerEnabled),
+            extendedEqualizerRange = extended,
             preampMillibels = optInt("preampMillibels", defaults.preampMillibels)
                 .coerceIn(-2400, 0),
             bandGainsMillibels = List(EqualizerBandCount) { index ->
-                bands?.optInt(index, 0)?.coerceIn(-1200, 1200) ?: 0
+                bands?.optInt(index, 0)?.coerceIn(-gainLimit, gainLimit) ?: 0
             },
             dynamicBassEnabled = optBoolean(
                 "dynamicBassEnabled",

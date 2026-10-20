@@ -28,7 +28,7 @@ internal fun AudioFreedomSettings.withVisibleEffects(preferences: AppPreferences
         detailRecoveryEnabled = detailRecoveryEnabled && preferences.isVisible(MainPageFunction.DetailRecovery),
         dynamicBassEnabled = dynamicBassEnabled && preferences.isVisible(MainPageFunction.BassFoundation),
         limiterEnabled = limiterEnabled && preferences.isVisible(MainPageFunction.OutputProtection),
-    )
+    ).withEqualizerRange(preferences.extendedEqualizerRange && preferences.extendedEqualizerRangeAcknowledged)
 
 internal fun hiddenMainPageFunctions(keys: Set<String>): Set<MainPageFunction> =
     MainPageFunction.entries.filterTo(mutableSetOf()) { it.storageKey in keys }

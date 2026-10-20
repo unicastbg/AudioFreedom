@@ -6,6 +6,7 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -14,6 +15,8 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,6 +25,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
@@ -36,7 +41,9 @@ import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.Tv
@@ -46,6 +53,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -64,6 +72,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -71,6 +80,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -119,7 +129,7 @@ private sealed interface PendingDriverModuleAction {
 }
 
 @Composable
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 internal fun SettingsScreen(
     route: AudioRoute,
     profiles: List<AudioFreedomProfile>,
@@ -130,6 +140,9 @@ internal fun SettingsScreen(
     onOpenAssistantSettings: () -> Unit,
     onOpenMainPageSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    openDriverUpdates: Boolean = false,
+    onDriverUpdatesShown: () -> Unit = {},
+    onOpenThemes: () -> Unit = {},
 ) {
     val context = LocalContext.current
     var profileMenuExpanded by remember { mutableStateOf(false) }
@@ -143,13 +156,29 @@ internal fun SettingsScreen(
     var moduleUpdateState by remember { mutableStateOf<DriverModuleUpdateResult?>(null) }
     var moduleUpdateChecking by remember { mutableStateOf(false) }
     var moduleOperationState by remember {
-        mutableStateOf<DriverModuleOperationState>(DriverModuleOperationState.Idle)
+        mutableStateOf<DriverModuleOperationState>(
+            DriverModuleNoticeStore.pendingRestart(context)?.let {
+                DriverModuleOperationState.RebootRequired(it)
+            } ?: DriverModuleOperationState.Idle,
+        )
     }
     var pendingModuleAction by remember { mutableStateOf<PendingDriverModuleAction?>(null) }
     val updateScope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
     val assignedProfile = profiles.firstOrNull { it.id == assignedProfileId }
     val bundledModule = remember(context) { DriverModuleManager.bundled(context) }
+    val driverSection = remember { BringIntoViewRequester() }
+    var confirmRestart by remember { mutableStateOf(false) }
+    var restarting by remember { mutableStateOf(false) }
+    var restartMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(openDriverUpdates) {
+        if (openDriverUpdates) {
+            withFrameNanos { }
+            driverSection.bringIntoView()
+            onDriverUpdatesShown()
+        }
+    }
 
     fun openAppInstaller() {
         val ready = appDownloadState as? AppDownloadState.Ready ?: return
@@ -278,8 +307,11 @@ internal fun SettingsScreen(
                     DriverModuleManager.downloadAndInstall(context, action.release)
             }
             moduleOperationState = when (result) {
-                is DriverModuleInstallResult.Success ->
+                is DriverModuleInstallResult.Success -> {
+                    moduleUpdateState = null
+                    confirmRestart = true
                     DriverModuleOperationState.RebootRequired(result.rootManager)
+                }
                 is DriverModuleInstallResult.Failed ->
                     DriverModuleOperationState.Failed(result.message)
             }
@@ -430,53 +462,16 @@ internal fun SettingsScreen(
             }
             Icon(Icons.Rounded.ChevronRight, contentDescription = null)
         }
-        Text(
-            "Theme",
-            style = MaterialTheme.typography.titleSmall,
-            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
-        )
-        val systemDark = isSystemInDarkTheme()
-        AppTheme.entries.forEach { theme ->
-            ThemeChoiceRow(
-                theme = theme,
-                selected = preferences.appTheme == theme,
-                swatch = themeSwatch(theme, isDark(preferences.theme, theme, systemDark)),
-                onClick = { onPreferencesChanged(preferences.copy(appTheme = theme)) },
-            )
-        }
-        Text(
-            "Mode",
-            style = MaterialTheme.typography.titleSmall,
-            modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
-        )
-        val modeAvailable = preferences.appTheme.supportsLight
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            ThemePreference.entries.forEachIndexed { index, mode ->
-                SegmentedButton(
-                    selected = preferences.theme == mode,
-                    onClick = { onPreferencesChanged(preferences.copy(theme = mode)) },
-                    enabled = modeAvailable,
-                    shape = SegmentedButtonDefaults.itemShape(
-                        index = index,
-                        count = ThemePreference.entries.size,
-                    ),
-                ) {
-                    Text(mode.label)
-                }
+        Row(Modifier.fillMaxWidth().clickable(onClick = onOpenThemes).padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Palette, contentDescription = null)
+            Column(Modifier.padding(start = 16.dp).weight(1F)) {
+                Text("Themes", style = MaterialTheme.typography.bodyLarge)
+                Text(preferences.appTheme.label, style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            Icon(Icons.Rounded.ChevronRight, contentDescription = null)
         }
-        Text(
-            if (modeAvailable) {
-                "Every theme except Studio has a light and a dark version that follows " +
-                    "this mode. Changes apply instantly; no restart needed."
-            } else {
-                "${preferences.appTheme.label} is always dark, so mode doesn't apply. " +
-                    "Changes apply instantly; no restart needed."
-            },
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(top = 8.dp),
-        )
 
         HorizontalDivider(
             modifier = Modifier.padding(top = 24.dp),
@@ -564,7 +559,8 @@ internal fun SettingsScreen(
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth().bringIntoViewRequester(driverSection)
+                .padding(vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(Icons.Rounded.Build, contentDescription = null)
@@ -586,6 +582,12 @@ internal fun SettingsScreen(
                 )
             }
             when (moduleOperationState) {
+                is DriverModuleOperationState.RebootRequired -> {
+                    TextButton(onClick = { confirmRestart = true }, enabled = !restarting) {
+                        Icon(Icons.Rounded.RestartAlt, contentDescription = null)
+                        Text(if (restarting) "Restarting" else "Restart phone")
+                    }
+                }
                 is DriverModuleOperationState.Working -> CircularProgressIndicator(
                     modifier = Modifier.size(24.dp),
                     strokeWidth = 2.dp,
@@ -609,9 +611,13 @@ internal fun SettingsScreen(
                 }
             }
         }
+        restartMessage?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
+            modifier = Modifier.fillMaxWidth().testTag("update-check-row"),
+            horizontalArrangement = Arrangement.Center,
         ) {
             TextButton(
                 onClick = ::checkAllUpdates,
@@ -632,6 +638,30 @@ internal fun SettingsScreen(
             }
         }
         Spacer(Modifier.height(32.dp))
+    }
+
+    if (confirmRestart) {
+        AlertDialog(
+            onDismissRequest = { confirmRestart = false },
+            title = { Text("Restart phone?") },
+            text = { Text("The driver module was installed successfully. Restart your phone to activate it. " +
+                "This stops playback and closes running apps. You can also restart later using the power menu.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmRestart = false
+                    restarting = true
+                    restartMessage = null
+                    updateScope.launch {
+                        restartMessage = DriverModuleManager.restartPhone(context)
+                            ?: "Restart requested. If the phone stays on, restart using the power menu."
+                        restarting = false
+                    }
+                }) { Text("Restart now") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRestart = false }) { Text("Later") }
+            },
+        )
     }
 
     pendingModuleAction?.let { action ->
@@ -787,42 +817,5 @@ private fun SettingsSwitchRow(
             )
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange)
-    }
-}
-
-@Composable
-private fun ThemeChoiceRow(
-    theme: AppTheme,
-    selected: Boolean,
-    swatch: List<Color>,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(selected = selected, onClick = null)
-        Column(modifier = Modifier.padding(start = 12.dp).weight(1F)) {
-            Text(theme.label, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                theme.summary,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-        // Preview: background, card and accent of the variant that would actually show.
-        Row(horizontalArrangement = Arrangement.spacedBy((-6).dp)) {
-            swatch.forEach { color ->
-                Box(
-                    modifier = Modifier
-                        .size(22.dp)
-                        .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                        .background(color, CircleShape),
-                )
-            }
-        }
     }
 }

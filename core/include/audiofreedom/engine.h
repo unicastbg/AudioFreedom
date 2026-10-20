@@ -27,8 +27,8 @@ public:
     static constexpr std::int32_t kMinPreampMillibels = -2400;
     static constexpr std::int32_t kMaxPreampMillibels = 0;
     static constexpr std::int32_t kProofPreampMillibels = -1200;
-    static constexpr std::int32_t kMinEqBandMillibels = -1200;
-    static constexpr std::int32_t kMaxEqBandMillibels = 1200;
+    static constexpr std::int32_t kMinEqBandMillibels = -2000;
+    static constexpr std::int32_t kMaxEqBandMillibels = 2000;
     static constexpr std::int32_t kMinLimiterThresholdMillibels = -600;
     static constexpr std::int32_t kMaxLimiterThresholdMillibels = 0;
     static constexpr std::int32_t kDefaultLimiterThresholdMillibels = -100;

@@ -43,7 +43,7 @@ class VolumeLevelerTest {
         val bytes = AudioFreedomProtocol.volumeLevelerConfiguration(before)
         val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
         assertEquals(40, bytes.size)
-        assertEquals(8, buffer.getShort(6).toInt())
+        assertEquals(9, buffer.getShort(6).toInt())
         assertEquals(0x1700, buffer.getInt(8))
         assertEquals(20, buffer.getInt(12))
         assertEquals(1, bytes[16].toInt())

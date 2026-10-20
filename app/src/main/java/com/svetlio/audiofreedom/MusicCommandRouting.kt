@@ -43,3 +43,14 @@ internal fun MusicBridgeResult.message(): String = when (this) {
     MusicBridgeResult.TimedOut -> "Media Player did not confirm the request in time. Check playback before trying again."
     MusicBridgeResult.Failed -> "Media Player could not complete the music request."
 }
+
+// The current player exposes a text reply, not a separate success/action field.
+// Match only its successful library-play reply, never every "handled" result.
+private val LibraryPlayReply = Regex("Playing .+, [1-9][0-9]* tracks?\\.?", RegexOption.DOT_MATCHES_ALL)
+
+internal fun MusicBridgeResult.spokenMessage(detailed: Boolean): String {
+    val fullMessage = message()
+    return if (!detailed && this is MusicBridgeResult.Handled && LibraryPlayReply.matches(fullMessage)) {
+        "Playing"
+    } else fullMessage
+}

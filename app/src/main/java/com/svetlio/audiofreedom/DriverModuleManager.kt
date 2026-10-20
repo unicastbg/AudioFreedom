@@ -297,8 +297,22 @@ internal object DriverModuleManager {
                     ?.take(160)
                     ?: "Driver installation failed",
             )
-            else -> DriverModuleInstallResult.Success(rootManager.ifBlank { "root manager" })
+            else -> {
+                val manager = rootManager.ifBlank { "root manager" }
+                DriverModuleNoticeStore.installed(context, manager)
+                DriverModuleInstallResult.Success(manager)
+            }
         }
+    }
+
+    suspend fun restartPhone(context: Context): String? = withContext(Dispatchers.IO) {
+        if (probeRootAccess() != RootAccessState.Available) {
+            return@withContext "Root access is required to restart. You can restart using the phone's power menu."
+        }
+        val result = executeRootCommand(context, "reboot", RootProbeTimeoutSeconds)
+        if (result.timedOut || result.exitCode != 0) {
+            "Could not restart automatically. Restart using the phone's power menu."
+        } else null
     }
 
     private fun downloadModule(downloadUrl: String, target: File) {

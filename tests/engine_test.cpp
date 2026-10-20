@@ -128,9 +128,9 @@ void test_equalizer_band_gain_and_limits() {
     expect(!engine.set_eq_band_millibels(audiofreedom::Engine::kEqBandCount, 100),
            "invalid band index must be rejected");
     expect(engine.set_eq_band_millibels(0, 5000), "valid band must clamp high gain");
-    expect(engine.eq_band_millibels(0) == 1200, "EQ high gain was not clamped");
+    expect(engine.eq_band_millibels(0) == 2000, "EQ high gain was not clamped");
     expect(engine.set_eq_band_millibels(0, -5000), "valid band must clamp low gain");
-    expect(engine.eq_band_millibels(0) == -1200, "EQ low gain was not clamped");
+    expect(engine.eq_band_millibels(0) == -2000, "EQ low gain was not clamped");
     expect(engine.set_eq_band_millibels(0, 0), "valid band must return to flat");
     engine.set_enabled(true);
 
@@ -154,6 +154,47 @@ void test_equalizer_band_gain_and_limits() {
     const float measured_gain_db = 10.0F * std::log10(
             static_cast<float>(output_energy / input_energy));
     expect_near(measured_gain_db, 6.0F, 0.05F, "1 kHz EQ band is not +6 dB");
+}
+
+void test_extended_equalizer_gain_and_stability() {
+    for (const auto rate : {44100U, 48000U, 96000U, 192000U}) {
+        for (const auto gain : {-2000, 2000}) {
+            audiofreedom::Engine engine;
+            expect(engine.prepare({rate, 2}), "extended EQ stream must prepare");
+            engine.set_preamp_millibels(0);
+            engine.set_equalizer_enabled(true);
+            expect(engine.set_eq_band_millibels(5, gain), "extended band must be accepted");
+            engine.set_enabled(true);
+            const std::size_t frames = rate;
+            std::vector<float> samples(frames * 2);
+            double input_energy = 0.0;
+            for (std::size_t frame = 0; frame < frames; ++frame) {
+                const float input = 0.0001F * std::sin(2.0F * 3.14159265358979323846F *
+                    1000.0F * static_cast<float>(frame) / static_cast<float>(rate));
+                samples[frame * 2] = samples[frame * 2 + 1] = input;
+                if (frame >= rate / 2) input_energy += static_cast<double>(input) * input;
+            }
+            expect(engine.process(samples.data(), frames), "extended EQ must process");
+            double output_energy = 0.0;
+            for (std::size_t frame = rate / 2; frame < frames; ++frame) {
+                const float output = samples[frame * 2];
+                expect(std::isfinite(output), "extended EQ must remain finite");
+                expect_near(output, samples[frame * 2 + 1], 0.000001F, "extended EQ must match stereo channels");
+                output_energy += static_cast<double>(output) * output;
+            }
+            const float measured = 10.0F * std::log10(static_cast<float>(output_energy / input_energy));
+            expect_near(measured, static_cast<float>(gain) / 100.0F, 0.08F,
+                        "extended EQ did not reach the requested +/-20 dB gain");
+            for (std::size_t band = 0; band < audiofreedom::Engine::kEqBandCount; ++band) {
+                expect(engine.set_eq_band_millibels(band, gain), "extended band must be accepted");
+            }
+            expect(engine.process(samples.data(), frames), "all extended EQ bands must process");
+            for (const float sample : samples) {
+                expect(std::isfinite(sample) && std::abs(sample) <= 1.0F,
+                       "extended EQ with output limiting must remain finite and bounded");
+            }
+        }
+    }
 }
 
 void test_equalizer_handles_multichannel_and_reset() {
@@ -949,6 +990,7 @@ int main() {
     test_preamp_is_clamped();
     test_flat_equalizer_preserves_pcm();
     test_equalizer_band_gain_and_limits();
+    test_extended_equalizer_gain_and_stability();
     test_equalizer_handles_multichannel_and_reset();
     test_limiter_caps_peaks_and_links_channels();
     test_limiter_release_and_clamping();

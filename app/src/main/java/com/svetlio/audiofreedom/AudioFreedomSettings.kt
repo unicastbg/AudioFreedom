@@ -12,6 +12,7 @@ internal data class AudioFreedomSettings(
     val equalizerEnabled: Boolean = false,
     val preampMillibels: Int = 0,
     val bandGainsMillibels: List<Int> = List(EqualizerBandCount) { 0 },
+    val extendedEqualizerRange: Boolean = false,
     val dynamicBassEnabled: Boolean = false,
     val bassBoostMillibels: Int = 600,
     val bassCutoffHz: Int = 95,
@@ -298,7 +299,8 @@ internal object AudioFreedomSettingsStore {
             equalizerEnabled = preferences.getBoolean(KeyEqualizerEnabled, false),
             preampMillibels = preferences.getInt(KeyPreamp, 0).coerceIn(-2400, 0),
             bandGainsMillibels = List(EqualizerBandCount) { band ->
-                preferences.getInt("$KeyBandPrefix$band", 0).coerceIn(-1200, 1200)
+                preferences.getInt("$KeyBandPrefix$band", 0)
+                    .coerceIn(-ExtendedEqualizerGainLimit, ExtendedEqualizerGainLimit)
             },
             dynamicBassEnabled = preferences.getBoolean(KeyDynamicBassEnabled, false),
             bassBoostMillibels = preferences.getInt(KeyBassBoost, 600).coerceIn(0, 1200),
@@ -376,7 +378,7 @@ internal object AudioFreedomSettingsStore {
             .putInt(KeyLimiterThreshold, settings.limiterThresholdMillibels.coerceIn(-600, 0))
             .putInt(KeyLimiterRelease, settings.limiterReleaseMilliseconds.coerceIn(20, 1000))
         settings.bandGainsMillibels.forEachIndexed { band, gain ->
-            editor.putInt("$KeyBandPrefix$band", gain.coerceIn(-1200, 1200))
+            editor.putInt("$KeyBandPrefix$band", gain.coerceIn(-settings.equalizerGainLimit, settings.equalizerGainLimit))
         }
         editor.apply()
     }

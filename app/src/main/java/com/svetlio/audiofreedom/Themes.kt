@@ -10,12 +10,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -24,8 +27,8 @@ import androidx.core.view.WindowCompat
 /**
  * Root theme for every AudioFreedom screen.
  *
- * [mode] (System / Light / Dark) and [theme] (Classic / Mocha / Daylight / Studio) are
- * independent settings. Both are read from Compose state, so changing either one in
+ * [mode] (System / Light / Dark) and [theme] are independent settings; a theme that
+ * only comes in one shade (see [ThemeModes]) ignores the mode. Both are read from Compose state, so changing either one in
  * Settings recolours the app immediately; no restart is needed.
  *
  * @param controlSystemBars false for floating windows (the voice widget) that must not
@@ -39,7 +42,7 @@ internal fun AudioFreedomTheme(
     content: @Composable () -> Unit,
 ) {
     val dark = isDark(mode, theme, isSystemInDarkTheme())
-    val colorScheme = colorSchemeFor(theme, dark)
+    val colorScheme = colorSchemeFor(theme, dark, LocalContext.current)
 
     if (controlSystemBars) {
         val view = LocalView.current
@@ -56,7 +59,10 @@ internal fun AudioFreedomTheme(
         }
     }
 
-    CompositionLocalProvider(LocalLayoutStyle provides theme.layoutStyle) {
+    CompositionLocalProvider(
+        LocalLayoutStyle provides theme.layoutStyle,
+        LocalThemeLook provides theme.look,
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             shapes = shapesFor(theme),
@@ -80,6 +86,8 @@ internal enum class LayoutStyle {
     Cards,
     /** Studio: numbered rack rows with LEDs and monospaced readouts. */
     Rack,
+    /** Cassette Deck: chunky piano keys — tap to engage, the small button opens controls. */
+    Keys,
     ;
 
     val modern: Boolean get() = this != Classic
@@ -91,36 +99,106 @@ internal val AppTheme.layoutStyle: LayoutStyle
         AppTheme.Mocha -> LayoutStyle.Tiles
         AppTheme.Daylight -> LayoutStyle.Cards
         AppTheme.Studio -> LayoutStyle.Rack
+        AppTheme.Dynamic -> LayoutStyle.Cards
+        AppTheme.MediaPlayer -> LayoutStyle.Tiles
+        AppTheme.OledBlack -> LayoutStyle.Cards
+        AppTheme.Phosphor -> LayoutStyle.Rack
+        AppTheme.Paper -> LayoutStyle.Cards
+        AppTheme.Valve -> LayoutStyle.Cards
+        AppTheme.Neon -> LayoutStyle.Cards
+        AppTheme.CassetteDeck -> LayoutStyle.Keys
     }
 
 internal val LocalLayoutStyle = staticCompositionLocalOf { LayoutStyle.Classic }
 
+/** How the live meters on the processing card are drawn. */
+internal enum class MeterLook {
+    /** Spectrum bars (segmented LEDs under the Rack layout). */
+    Bars,
+    /** Phosphor: an oscilloscope trace over a grid. */
+    Trace,
+    /** Neon: a glowing outline over a perspective floor. */
+    Glow,
+    /** Valve: an analog VU meter with a swinging needle. */
+    Vu,
+    /** Cassette Deck: an amber LCD window. */
+    Lcd,
+}
+
+/**
+ * The finishing touches that make a theme more than a palette. Layout comes from
+ * [LayoutStyle]; this adds the per-theme details on top of it.
+ */
+internal data class ThemeLook(
+    val meter: MeterLook = MeterLook.Bars,
+    /** No container behind the processing card — content sits on the background. */
+    val flatHero: Boolean = false,
+    /** Power button drawn as an outlined ring rather than a filled disc. */
+    val ringPower: Boolean = false,
+    /** Neon glow around the power button and switched-on effects. */
+    val glow: Boolean = false,
+    /** Valve pilot lamps instead of icon badges, and a warm glow on the power button. */
+    val lamps: Boolean = false,
+)
+
+internal val AppTheme.look: ThemeLook
+    get() = when (this) {
+        AppTheme.OledBlack -> ThemeLook(flatHero = true, ringPower = true)
+        AppTheme.Phosphor -> ThemeLook(meter = MeterLook.Trace)
+        AppTheme.Paper -> ThemeLook(flatHero = true)
+        AppTheme.Valve -> ThemeLook(meter = MeterLook.Vu, lamps = true)
+        AppTheme.Neon -> ThemeLook(meter = MeterLook.Glow, glow = true)
+        AppTheme.CassetteDeck -> ThemeLook(meter = MeterLook.Lcd)
+        else -> ThemeLook()
+    }
+
+internal val LocalThemeLook = staticCompositionLocalOf { ThemeLook() }
+
 internal fun isDark(mode: ThemePreference, theme: AppTheme, systemDark: Boolean): Boolean =
-    if (!theme.supportsLight) {
-        true
-    } else {
-        when (mode) {
+    when (theme.modes) {
+        ThemeModes.DarkOnly -> true
+        ThemeModes.LightOnly -> false
+        ThemeModes.Both -> when (mode) {
             ThemePreference.System -> systemDark
             ThemePreference.Light -> false
             ThemePreference.Dark -> true
         }
     }
 
-/** Three colours (background, card, accent) for the theme picker's preview chips. */
-internal fun themeSwatch(theme: AppTheme, dark: Boolean): List<Color> {
-    val scheme = colorSchemeFor(theme, dark || !theme.supportsLight)
-    return listOf(scheme.background, scheme.surfaceContainerHighest, scheme.primary)
-}
+internal fun colorSchemeFor(theme: AppTheme, dark: Boolean, context: Context): ColorScheme =
+    when (theme) {
+        AppTheme.Classic -> if (dark) ClassicDark else ClassicLight
+        AppTheme.Mocha -> if (dark) MochaDark else MochaLight
+        AppTheme.Daylight -> if (dark) DaylightDark else DaylightLight
+        AppTheme.Studio -> StudioDark
+        // Android derives these from the wallpaper (minSdk 35, so always available).
+        AppTheme.Dynamic ->
+            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        AppTheme.MediaPlayer -> MediaPlayerDark
+        AppTheme.OledBlack -> OledBlackDark
+        AppTheme.Phosphor -> PhosphorDark
+        AppTheme.Paper -> PaperLight
+        AppTheme.Valve -> ValveDark
+        AppTheme.Neon -> NeonDark
+        AppTheme.CassetteDeck -> CassetteLight
+    }
 
-internal fun colorSchemeFor(theme: AppTheme, dark: Boolean): ColorScheme = when (theme) {
-    AppTheme.Classic -> if (dark) ClassicDark else ClassicLight
-    AppTheme.Mocha -> if (dark) MochaDark else MochaLight
-    AppTheme.Daylight -> if (dark) DaylightDark else DaylightLight
-    AppTheme.Studio -> StudioDark
-}
+private fun shapes(xs: Int, s: Int, m: Int, l: Int, xl: Int) = Shapes(
+    extraSmall = RoundedCornerShape(xs.dp),
+    small = RoundedCornerShape(s.dp),
+    medium = RoundedCornerShape(m.dp),
+    large = RoundedCornerShape(l.dp),
+    extraLarge = RoundedCornerShape(xl.dp),
+)
 
 private fun shapesFor(theme: AppTheme): Shapes = when (theme) {
-    AppTheme.Classic -> Shapes()
+    AppTheme.Classic, AppTheme.Dynamic -> Shapes()
+    AppTheme.MediaPlayer, AppTheme.Neon -> shapes(8, 12, 16, 24, 32)
+    AppTheme.OledBlack -> shapes(4, 8, 12, 16, 24)
+    AppTheme.Phosphor -> shapes(2, 3, 4, 6, 8)
+    AppTheme.Paper -> shapes(4, 8, 12, 16, 20)
+    AppTheme.Valve -> shapes(6, 10, 14, 18, 24)
+    AppTheme.CassetteDeck -> shapes(3, 5, 8, 10, 12)
     AppTheme.Mocha -> Shapes(
         extraSmall = RoundedCornerShape(8.dp),
         small = RoundedCornerShape(12.dp),
@@ -146,6 +224,27 @@ private fun shapesFor(theme: AppTheme): Shapes = when (theme) {
 
 private fun typographyFor(theme: AppTheme): Typography {
     val base = Typography()
+    if (theme == AppTheme.Phosphor) {
+        // Phosphor: everything monospaced, like text on a scope screen.
+        val m = FontFamily.Monospace
+        return Typography(
+            displayLarge = base.displayLarge.copy(fontFamily = m),
+            displayMedium = base.displayMedium.copy(fontFamily = m),
+            displaySmall = base.displaySmall.copy(fontFamily = m),
+            headlineLarge = base.headlineLarge.copy(fontFamily = m),
+            headlineMedium = base.headlineMedium.copy(fontFamily = m),
+            headlineSmall = base.headlineSmall.copy(fontFamily = m),
+            titleLarge = base.titleLarge.copy(fontFamily = m),
+            titleMedium = base.titleMedium.copy(fontFamily = m),
+            titleSmall = base.titleSmall.copy(fontFamily = m),
+            bodyLarge = base.bodyLarge.copy(fontFamily = m),
+            bodyMedium = base.bodyMedium.copy(fontFamily = m),
+            bodySmall = base.bodySmall.copy(fontFamily = m),
+            labelLarge = base.labelLarge.copy(fontFamily = m),
+            labelMedium = base.labelMedium.copy(fontFamily = m),
+            labelSmall = base.labelSmall.copy(fontFamily = m),
+        )
+    }
     if (theme != AppTheme.Studio) return base
     // Studio: monospaced labels and readouts, like front-panel legends.
     val mono = FontFamily.Monospace

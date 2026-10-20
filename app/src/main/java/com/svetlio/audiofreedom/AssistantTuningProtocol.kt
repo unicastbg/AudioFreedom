@@ -85,7 +85,8 @@ internal object AssistantTuningProtocol {
                     val delta = (request.maximumBandDeltaMillibels.coerceIn(50, 300) * amount).roundToInt()
                     target = target.copy(equalizerEnabled = true,
                         bandGainsMillibels = target.bandGainsMillibels.mapIndexed { band, gain ->
-                            (gain + when (band) { 0 -> -delta / 2; 1 -> delta; 2 -> delta / 2; else -> 0 }).coerceIn(-1200, 1200)
+                            (gain + when (band) { 0 -> -delta / 2; 1 -> delta; 2 -> delta / 2; else -> 0 })
+                                .coerceIn(-request.current.equalizerGainLimit, request.current.equalizerGainLimit)
                         })
                     descriptions += "${if (amount > 0) "Increase" else "Reduce"} bass punch"
                     continue
@@ -120,8 +121,8 @@ internal object AssistantTuningProtocol {
             target = target.copy(preampMillibels = request.current.preampMillibels,
                 limiterEnabled = request.current.limiterEnabled,
                 bandGainsMillibels = target.bandGainsMillibels.mapIndexed { band, gain ->
-                    gain.coerceIn((request.current.bandGainsMillibels[band] - maximum).coerceAtLeast(-1200),
-                        (request.current.bandGainsMillibels[band] + maximum).coerceAtMost(1200))
+                    gain.coerceIn((request.current.bandGainsMillibels[band] - maximum).coerceAtLeast(-request.current.equalizerGainLimit),
+                        (request.current.bandGainsMillibels[band] + maximum).coerceAtMost(request.current.equalizerGainLimit))
                 }, bassBoostMillibels = target.bassBoostMillibels.coerceIn(
                     (request.current.bassBoostMillibels - maximum).coerceAtLeast(0),
                     (request.current.bassBoostMillibels + maximum).coerceAtMost(1200)))

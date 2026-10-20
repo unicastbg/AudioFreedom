@@ -516,7 +516,7 @@ internal object AssistantCommandPlanner {
 
         if (bandDeltas.any { it != 0 }) {
             val gains = current.bandGainsMillibels.mapIndexed { index, gain ->
-                (gain + bandDeltas[index]).coerceIn(-1200, 1200)
+                (gain + bandDeltas[index]).coerceIn(-current.equalizerGainLimit, current.equalizerGainLimit)
             }
             updated = updated.copy(
                 equalizerEnabled = true,
@@ -686,8 +686,8 @@ internal object AssistantCommandPlanner {
             title = "Load ${profile.name}",
             explanation = "Replace the current DSP settings with this saved profile.",
             baseSettings = current,
-            settings = profile.settings,
-            changes = describeChanges(current, profile.settings),
+            settings = profile.settings.withEqualizerRange(current.extendedEqualizerRange),
+            changes = describeChanges(current, profile.settings.withEqualizerRange(current.extendedEqualizerRange)),
             selectedProfileId = profile.id,
             canApplyAutomatically = false,
         ),

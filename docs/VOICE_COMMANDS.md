@@ -102,6 +102,13 @@ Listening focus is released before forwarding. When spoken replies are enabled, 
 briefly requests ducking focus and releases it afterward. An offline English Android TTS
 voice is required. Missing voices are reported rather than silently ignored.
 
+Music playback confirmations are brief by default: a successful artist/genre/track
+request says `Playing`, without repeating the name or track count. Enable **Detailed
+music replies** under Local assistant > Music commands to hear the full response.
+This section is available in both Push-to-talk and Volume-button modes. The on-screen
+reply keeps its details in either mode. Errors such as nothing found, an unindexed
+library, or an unavailable player are always explained; DSP readback is unchanged.
+
 Requests have an elapsed-realtime deadline and unique ID. The receiver checks the deadline
 after its library lookup and rejects duplicates. If a reply is lost, AudioFreedom reports
 that playback is unconfirmed, not that execution definitely failed. Check playback before

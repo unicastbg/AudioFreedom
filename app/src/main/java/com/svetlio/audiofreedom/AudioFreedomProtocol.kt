@@ -4,7 +4,7 @@ private const val WireMessageSize = 40
 private const val WireHeaderSize = 16
 private const val Magic = 0x31584641
 private const val ProtocolMajor = 1
-private const val ProtocolMinor = 8
+private const val ProtocolMinor = 9
 private const val ParameterPreamp = 0x1001
 private const val ParameterEqualizerEnabled = 0x1100
 private const val ParameterEqualizerBand = 0x1101
@@ -53,7 +53,8 @@ internal object AudioFreedomProtocol {
             )
             target[WireHeaderSize + 2] = if (settings.equalizerEnabled) 1 else 0
             settings.bandGainsMillibels.forEachIndexed { band, gain ->
-                putShort(target, WireHeaderSize + 4 + band * 2, gain)
+                putShort(target, WireHeaderSize + 4 + band * 2,
+                    gain.coerceIn(-settings.equalizerGainLimit, settings.equalizerGainLimit))
             }
         }
 

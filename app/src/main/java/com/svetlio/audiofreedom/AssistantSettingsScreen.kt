@@ -40,6 +40,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.delay
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -317,18 +319,6 @@ internal fun AssistantSettingsScreen(
             },
         )
         AssistantSettingsSwitchRow(
-            title = "Pass music commands to Media Player",
-            summary = "Send play, shuffle and playback commands directly to Media Player. " +
-                "Music names bypass DSP interpretation. Requires compatible versions " +
-                "of both apps signed with the same certificate.",
-            checked = preferences.assistantForwardMusicCommands,
-            // No point offering it with the player absent; the forward would do nothing.
-            enabled = MusicBridge.isInstalled(LocalContext.current),
-            onCheckedChange = {
-                onPreferencesChanged(preferences.copy(assistantForwardMusicCommands = it))
-            },
-        )
-        AssistantSettingsSwitchRow(
             title = "Pause media while listening",
             summary = "Ask the active player to pause while a voice command is captured",
             checked = preferences.assistantPauseMediaForVoice,
@@ -347,6 +337,28 @@ internal fun AssistantSettingsScreen(
             },
         )
         }
+        AssistantSettingsSectionTitle("Music commands")
+        AssistantSettingsSwitchRow(
+            title = "Pass music commands to Media Player",
+            summary = "Send play, shuffle and playback commands directly to Media Player. " +
+                "Music names bypass DSP interpretation. Requires compatible versions " +
+                "of both apps signed with the same certificate.",
+            checked = preferences.assistantForwardMusicCommands,
+            enabled = MusicBridge.isInstalled(context),
+            onCheckedChange = {
+                onPreferencesChanged(preferences.copy(assistantForwardMusicCommands = it))
+            },
+        )
+        AssistantSettingsSwitchRow(
+            title = "Detailed music replies",
+            summary = "Read artist or category names and track counts. Off: just Playing. " +
+                "Errors and playback warnings are always explained.",
+            checked = preferences.assistantDetailedMusicReplies,
+            enabled = preferences.assistantForwardMusicCommands && preferences.assistantSpeakVoiceConfirmation,
+            onCheckedChange = {
+                onPreferencesChanged(preferences.copy(assistantDetailedMusicReplies = it))
+            },
+        )
         AssistantSpeechSettings(preferences, onPreferencesChanged, voiceTestRunning, voiceTestMessage, onTestVoice)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
@@ -749,6 +761,7 @@ private fun AssistantSettingsSwitchRow(
             checked = checked,
             onCheckedChange = onCheckedChange,
             enabled = enabled,
+            modifier = Modifier.semantics { contentDescription = title },
         )
     }
 }
