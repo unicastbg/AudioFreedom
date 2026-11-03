@@ -94,6 +94,7 @@ private sealed interface UpdateSectionState {
     data object Checking : UpdateSectionState
     data class Available(val release: UpdateCheckResult.UpdateAvailable) : UpdateSectionState
     data class Current(val latestVersion: String) : UpdateSectionState
+    data object NetworkUnavailable : UpdateSectionState
     data object Failed : UpdateSectionState
 }
 
@@ -250,8 +251,11 @@ internal fun SettingsScreen(
         moduleState = DriverModuleSectionState.Inspecting
         updateScope.launch {
             moduleState = when (val result = DriverModuleManager.probeInstalled(context)) {
-                is DriverModuleProbeResult.Installed ->
+                is DriverModuleProbeResult.Installed -> {
+                    if (result.info.staged) moduleOperationState =
+                        DriverModuleOperationState.RebootRequired("module manager")
                     DriverModuleSectionState.Installed(result.info)
+                }
                 DriverModuleProbeResult.Missing -> DriverModuleSectionState.Missing
                 DriverModuleProbeResult.RootUnavailable ->
                     DriverModuleSectionState.RootUnavailable
@@ -282,6 +286,7 @@ internal fun SettingsScreen(
                     is UpdateCheckResult.UpdateAvailable -> UpdateSectionState.Available(result)
                     is UpdateCheckResult.UpToDate ->
                         UpdateSectionState.Current(result.latestVersion)
+                    UpdateCheckResult.NetworkUnavailable -> UpdateSectionState.NetworkUnavailable
                     UpdateCheckResult.Failed -> UpdateSectionState.Failed
                 }
                 moduleUpdateState = moduleResult?.await() ?: DriverModuleUpdateResult.Failed
@@ -362,7 +367,7 @@ internal fun SettingsScreen(
             Column(modifier = Modifier.weight(1F)) {
                 Text("Profile for ${route.label}", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    assignedProfile?.name ?: "Not assigned",
+                    assignedProfile?.displayName ?: "Not assigned",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -386,7 +391,7 @@ internal fun SettingsScreen(
                     )
                     profiles.forEach { profile ->
                         DropdownMenuItem(
-                            text = { Text(profile.name) },
+                            text = { Text(profile.displayName) },
                             onClick = {
                                 profileMenuExpanded = false
                                 onProfileAssigned(profile.id)
@@ -502,6 +507,8 @@ internal fun SettingsScreen(
                                 else "Version ${state.release.version} is available"
                         }
                         is UpdateSectionState.Current -> "Up to date"
+                        UpdateSectionState.NetworkUnavailable ->
+                            "Can't reach GitHub. Check your connection and allow network access for AudioFreedom in App info."
                         UpdateSectionState.Failed -> "Could not check for updates"
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -523,6 +530,12 @@ internal fun SettingsScreen(
                         }
                     }
                 }
+                UpdateSectionState.NetworkUnavailable -> TextButton(onClick = {
+                    context.startActivity(Intent(
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.fromParts("package", context.packageName, null),
+                    ))
+                }) { Text("App info") }
                 UpdateSectionState.Checking,
                 UpdateSectionState.Failed,
                 UpdateSectionState.Idle,
@@ -532,6 +545,10 @@ internal fun SettingsScreen(
         }
         if (updateState is UpdateSectionState.Available) {
             val release = (updateState as UpdateSectionState.Available).release
+            if (release.highlights.isNotEmpty()) {
+                Text("What's new", style = MaterialTheme.typography.labelLarge)
+                ReleaseHighlightList(release.highlights)
+            }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { uriHandler.openUri(release.releaseUrl) }, modifier = Modifier.weight(1F)) {
                     Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null)
@@ -704,7 +721,11 @@ private fun driverModuleSummary(
         DriverModuleOperationState.Idle -> when (update) {
             is DriverModuleUpdateResult.Available ->
                 "Version ${update.release.version} is available"
-            is DriverModuleUpdateResult.Current -> "Installed driver is up to date"
+            is DriverModuleUpdateResult.Current -> when {
+                state is DriverModuleSectionState.Installed && bundled != null &&
+                    state.info.needsBundledUpdate(bundled.info) -> "A matching bundled driver build is ready"
+                else -> "No newer GitHub driver release"
+            }
             DriverModuleUpdateResult.Failed -> "Could not check the latest driver release"
             null -> when (state) {
                 DriverModuleSectionState.Inspecting -> "Checking installed driver"
@@ -712,7 +733,9 @@ private fun driverModuleSummary(
                     "Not installed; version ${it.info.version} is ready"
                 } ?: "Not installed"
                 DriverModuleSectionState.RootUnavailable -> "Root access is required"
-                is DriverModuleSectionState.Installed -> "Installed ${state.info.version}"
+                is DriverModuleSectionState.Installed -> "Installed ${state.info.displayVersion()}" +
+                    if (bundled != null && state.info.needsBundledUpdate(bundled.info))
+                        "; matching build ${bundled.info.buildId?.take(8) ?: bundled.info.version} is ready" else ""
                 is DriverModuleSectionState.Failed -> state.message
             }
         }
@@ -739,12 +762,13 @@ private fun preferredModuleAction(
             description = "The bundled version ${bundled.info.version} will be installed.",
         )
         is DriverModuleSectionState.Installed -> {
-            val updateBundled = state.info.versionCode < bundled.info.versionCode
+            if (state.info.staged || state.info.versionCode > bundled.info.versionCode) return null
+            val updateBundled = state.info.needsBundledUpdate(bundled.info)
             PendingDriverModuleAction.Bundled(
                 title = if (updateBundled) "Update" else "Reinstall",
                 description = if (updateBundled) {
-                    "The bundled version ${bundled.info.version} will replace " +
-                        "${state.info.version}."
+                    "The bundled driver ${bundled.info.displayVersion()} will replace " +
+                        "${state.info.displayVersion()}."
                 } else {
                     "The bundled version ${bundled.info.version} will be installed again."
                 },

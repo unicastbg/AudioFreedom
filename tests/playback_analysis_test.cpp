@@ -1,5 +1,6 @@
 #include "audiofreedom/engine.h"
 #include "audiofreedom/wire.h"
+#include "../platform/common/StreamPublication.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -33,6 +34,39 @@ static void process(audiofreedom::Engine& engine, std::vector<float>& data, unsi
 }
 
 int main() {
+    {
+        audiofreedom::android::StreamPublication publication;
+        check(publication.read().sequence == 0, "stream starts live");
+        publication.publish(44100, 2, 1);
+        const auto first = publication.read();
+        check(first.sequence != 0 && first.sample_rate_hz == 44100 && first.channel_count == 2 &&
+                first.internal_format == 1 && first.io_format == 1, "stream snapshot incorrect");
+        publication.publish(96000, 6, 2);
+        const auto next = publication.read();
+        check(next.sequence != first.sequence && next.sample_rate_hz == 96000 &&
+                next.channel_count == 6 && next.io_format == 2, "stream route change not published");
+        const auto wire = audiofreedom::protocol::make_active_stream(next);
+        check(wire.parameter_id == audiofreedom::protocol::ParameterId::kActiveStream &&
+                wire.payload_size == 20 && audiofreedom::protocol::detail::get_u32(wire.payload, 4) == 96000 &&
+                audiofreedom::protocol::detail::get_u32(wire.payload, 12) == 1 &&
+                audiofreedom::protocol::detail::get_u32(wire.payload, 16) == 2, "stream wire layout incorrect");
+        std::atomic<bool> done{false};
+        std::thread writer([&] {
+            for (unsigned i = 0; i < 100000; ++i) {
+                publication.publish(48000, 2, 1);
+                publication.publish(192000, 8, 2);
+            }
+            done = true;
+        });
+        while (!done.load()) {
+            const auto value = publication.read();
+            check(value.sequence == 0 || (value.sample_rate_hz == 48000 && value.channel_count == 2 && value.io_format == 1) ||
+                    (value.sample_rate_hz == 192000 && value.channel_count == 8 && value.io_format == 2) ||
+                    (value.sample_rate_hz == 96000 && value.channel_count == 6 && value.io_format == 2),
+                    "concurrent stream snapshot torn");
+        }
+        writer.join();
+    }
     for (unsigned rate : {44100U, 48000U, 96000U, 192000U}) {
         for (unsigned channels : {1U, 2U, 6U, 32U}) {
             audiofreedom::Engine engine;

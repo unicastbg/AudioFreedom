@@ -5,6 +5,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DriverModuleNoticeTest {
+    @Test fun sameVersionNotifiesOncePerPayloadAndSuppressesStagedUpdates() {
+        val target = DriverModuleInfo("beta", 43, "a".repeat(64))
+        val result = DriverModuleProbeResult.Installed(DriverModuleInfo("beta", 43))
+        assertTrue(needsDriverUpdateNotice(result, target, 43, false))
+        assertFalse(needsDriverUpdateNotice(result, target, 43, false, target.buildId))
+        assertTrue(needsDriverUpdateNotice(result, target, 43, false, "b".repeat(64)))
+        assertFalse(needsDriverUpdateNotice(DriverModuleProbeResult.Installed(target.copy(staged = true)),
+            target.copy(buildId = "b".repeat(64)), 0, false))
+    }
     private val bundled = DriverModuleInfo("0.9.8-beta", 43)
     private fun installed(code: Int) =
         DriverModuleProbeResult.Installed(DriverModuleInfo("test", code))

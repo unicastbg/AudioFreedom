@@ -200,6 +200,8 @@ private fun ControllerScreen(
     var analysisNow by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
     var levelerPresetMenuExpanded by remember { mutableStateOf(false) }
     var outputMetrics by remember { mutableStateOf(AudioFreedomService.currentOutputMetrics) }
+    var streamFrame by remember { mutableStateOf<DspStreamFrame?>(null) }
+    var processingHealth by remember { mutableStateOf(AudioFreedomService.currentHealth) }
     val context = androidx.compose.ui.platform.LocalContext.current
     var appPreferences by remember { mutableStateOf(initialAppPreferences) }
     var profiles by remember { mutableStateOf(AudioFreedomProfileStore.list(context)) }
@@ -214,9 +216,9 @@ private fun ControllerScreen(
             assignedProfileId.takeIf { initialAppPreferences.automaticDeviceProfiles },
         )
     }
-    var profileMenuExpanded by remember { mutableStateOf(false) }
     var profileSaveRequest by remember { mutableStateOf<ProfileSaveRequest?>(null) }
     var profileName by remember { mutableStateOf("") }
+    var profileDeviceGroup by remember { mutableStateOf("") }
     var currentPage by rememberSaveable { mutableStateOf(ControllerPage.Main) }
     var openDriverUpdates by rememberSaveable { mutableStateOf(false) }
     var extendedEqDriverUpdateRequired by remember { mutableStateOf(false) }
@@ -419,11 +421,14 @@ private fun ControllerScreen(
     LaunchedEffect(enabled) {
         if (!enabled) {
             outputMetrics = null
+            streamFrame = null
             analysisFrame = null
             return@LaunchedEffect
         }
         while (true) {
             outputMetrics = AudioFreedomService.currentOutputMetrics
+            processingHealth = AudioFreedomService.currentHealth
+            streamFrame = AudioFreedomService.currentStreamFrame
             analysisFrame = AudioFreedomService.currentPlaybackAnalysis
             analysisSupported = AudioFreedomService.analysisSupported
             analysisNow = SystemClock.elapsedRealtime()
@@ -707,11 +712,14 @@ private fun ControllerScreen(
             profiles = profiles,
             profileId = request.profileId,
             name = profileName,
+            deviceGroup = profileDeviceGroup,
             onProfileChanged = { profileId ->
                 profileSaveRequest = ProfileSaveRequest(profileId)
                 profileName = profiles.firstOrNull { it.id == profileId }?.name.orEmpty()
+                profileDeviceGroup = profiles.firstOrNull { it.id == profileId }?.deviceGroup.orEmpty()
             },
             onNameChange = { profileName = it },
+            onDeviceGroupChange = { profileDeviceGroup = it },
             onDismiss = { profileSaveRequest = null },
             onSave = {
                 val saved = AudioFreedomProfileStore.save(
@@ -719,6 +727,7 @@ private fun ControllerScreen(
                     name = profileName,
                     settings = settings,
                     profileId = request.profileId,
+                    deviceGroup = profileDeviceGroup,
                 )
                 profiles = AudioFreedomProfileStore.list(context)
                 selectedProfileId = saved.id
@@ -728,7 +737,8 @@ private fun ControllerScreen(
     }
 
     if (currentPage == ControllerPage.Main) {
-        DriverModuleUpdateNotice(onOpenUpdates = {
+        val showingHighlights = ReleaseHighlightsNotice()
+        if (!showingHighlights) DriverModuleUpdateNotice(onOpenUpdates = {
             openDriverUpdates = true
             currentPage = ControllerPage.Settings
         }, onModuleChecked = { extendedEqDriverUpdateRequired = needsExtendedEqualizerDriverUpdate(it) })
@@ -940,17 +950,18 @@ private fun ControllerScreen(
                 ?.settings
                 ?.let { it != settings } == true
             val selectProfile: (AudioFreedomProfile) -> Unit = { profile ->
-                profileMenuExpanded = false
                 commitSettings(profile.settings)
                 selectedProfileId = profile.id
             }
             val addProfile: () -> Unit = {
                 profileName = ""
+                profileDeviceGroup = ""
                 profileSaveRequest = ProfileSaveRequest(profileId = null)
             }
             val saveProfile: () -> Unit = {
                 val selected = profiles.firstOrNull { it.id == selectedProfileId }
                 profileName = selected?.name.orEmpty()
+                profileDeviceGroup = selected?.deviceGroup.orEmpty()
                 profileSaveRequest = ProfileSaveRequest(profileId = selected?.id)
             }
             val deleteProfile: () -> Unit = {
@@ -994,8 +1005,10 @@ private fun ControllerScreen(
                         ?.takeIf { it.isFresh(analysisNow) }
                         ?.values
                         ?.outputRmsMillibels,
+                    streamLabel = streamFrame?.takeIf { it.isFresh(analysisNow) }?.value?.label(),
+                    processingHealth = processingHealth,
                 )
-                ProfileChipsRow(
+                ProfileBrowserRow(
                     profiles = profiles,
                     selectedProfileId = selectedProfileId,
                     profileModified = currentProfileModified,
@@ -1003,6 +1016,12 @@ private fun ControllerScreen(
                     onAdd = addProfile,
                     onSave = saveProfile,
                     onDelete = deleteProfile,
+                    routeLabel = audioRoute.label,
+                    assignedProfileId = assignedProfileId,
+                    onAssignDefault = { id ->
+                        AppPreferencesStore.assignProfile(context, audioRoute.id, id)
+                        assignedProfileId = id
+                    },
                 )
             } else {
             DriverStatusRow(driverState, rootAccessState)
@@ -1013,13 +1032,22 @@ private fun ControllerScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Column {
+                Column(Modifier.weight(1F)) {
                     Text("Processing", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        if (enabled && driverAvailable) "Enabled" else "Disabled",
+                        if (enabled && driverAvailable) processingHealth.title else "Disabled",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
                     )
+                    Text(
+                        if (enabled) streamFrame?.takeIf { it.isFresh(analysisNow) }?.value?.label()
+                            ?: "DSP format unavailable / idle" else "DSP bypassed",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    if (enabled) processingHealth.detail?.let { Text(it,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall) }
                 }
                 Switch(
                     checked = enabled && driverAvailable,
@@ -1031,16 +1059,20 @@ private fun ControllerScreen(
                 modifier = Modifier.padding(top = 18.dp),
                 color = MaterialTheme.colorScheme.outlineVariant,
             )
-            ProfileControlRow(
+            ProfileBrowserRow(
                 profiles = profiles,
                 selectedProfileId = selectedProfileId,
                 profileModified = currentProfileModified,
-                menuExpanded = profileMenuExpanded,
-                onMenuExpandedChange = { profileMenuExpanded = it },
                 onProfileSelected = selectProfile,
                 onAdd = addProfile,
                 onSave = saveProfile,
                 onDelete = deleteProfile,
+                routeLabel = audioRoute.label,
+                assignedProfileId = assignedProfileId,
+                onAssignDefault = { id ->
+                    AppPreferencesStore.assignProfile(context, audioRoute.id, id)
+                    assignedProfileId = id
+                },
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
@@ -1773,23 +1805,29 @@ private fun ProfileSaveDialog(
     profiles: List<AudioFreedomProfile>,
     profileId: String?,
     name: String,
+    deviceGroup: String,
     onProfileChanged: (String?) -> Unit,
     onNameChange: (String) -> Unit,
+    onDeviceGroupChange: (String) -> Unit,
     onDismiss: () -> Unit,
     onSave: () -> Unit,
 ) {
     var targetMenuExpanded by remember { mutableStateOf(false) }
     val selectedProfile = profiles.firstOrNull { it.id == profileId }
+    val duplicate = profiles.any {
+        it.id != profileId && it.name.equals(name.trim(), ignoreCase = true) &&
+            it.deviceGroup.equals(deviceGroup.trim(), ignoreCase = true)
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text("Save to", style = MaterialTheme.typography.labelLarge)
                 androidx.compose.foundation.layout.Box {
                     TextButton(onClick = { targetMenuExpanded = true }) {
                         Text(
-                            selectedProfile?.name ?: "New profile",
+                            selectedProfile?.displayName ?: "New profile",
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -1808,7 +1846,7 @@ private fun ProfileSaveDialog(
                         )
                         profiles.forEach { profile ->
                             DropdownMenuItem(
-                                text = { Text(profile.name) },
+                                text = { Text(profile.displayName) },
                                 onClick = {
                                     targetMenuExpanded = false
                                     onProfileChanged(profile.id)
@@ -1823,10 +1861,19 @@ private fun ProfileSaveDialog(
                     label = { Text("Profile name") },
                     singleLine = true,
                 )
+                OutlinedTextField(
+                    value = deviceGroup,
+                    onValueChange = { onDeviceGroupChange(it.take(100)) },
+                    label = { Text("Device group (optional)") },
+                    placeholder = { Text("Sony Amp, headphones, speakers") },
+                    singleLine = true,
+                )
+                if (duplicate) Text("Choose the existing profile above to update it, or use another name.",
+                    color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
         },
         confirmButton = {
-            TextButton(onClick = onSave, enabled = name.isNotBlank()) {
+            TextButton(onClick = onSave, enabled = name.isNotBlank() && !duplicate) {
                 Text("Save")
             }
         },
@@ -1838,70 +1885,6 @@ private fun ProfileSaveDialog(
     )
 }
 
-@Composable
-private fun ProfileControlRow(
-    profiles: List<AudioFreedomProfile>,
-    selectedProfileId: String?,
-    profileModified: Boolean,
-    menuExpanded: Boolean,
-    onMenuExpandedChange: (Boolean) -> Unit,
-    onProfileSelected: (AudioFreedomProfile) -> Unit,
-    onAdd: () -> Unit,
-    onSave: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    val selected = profiles.firstOrNull { it.id == selectedProfileId }
-    Row(
-        modifier = Modifier.fillMaxWidth().heightIn(min = 76.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1F)) {
-            Text("Profile", style = MaterialTheme.typography.titleMedium)
-            androidx.compose.foundation.layout.Box {
-                TextButton(onClick = { onMenuExpandedChange(true) }) {
-                    Text(
-                        when {
-                            selected == null -> "Current settings"
-                            profileModified -> "${selected.name} (Modified)"
-                            else -> selected.name
-                        },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Icon(Icons.Rounded.ExpandMore, contentDescription = "Choose profile")
-                }
-                DropdownMenu(
-                    expanded = menuExpanded,
-                    onDismissRequest = { onMenuExpandedChange(false) },
-                ) {
-                    if (profiles.isEmpty()) {
-                        DropdownMenuItem(
-                            text = { Text("No saved profiles") },
-                            onClick = {},
-                            enabled = false,
-                        )
-                    } else {
-                        profiles.forEach { profile ->
-                            DropdownMenuItem(
-                                text = { Text(profile.name) },
-                                onClick = { onProfileSelected(profile) },
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        IconButton(onClick = onAdd) {
-            Icon(Icons.Rounded.Add, contentDescription = "Save as new profile")
-        }
-        IconButton(onClick = onSave) {
-            Icon(Icons.Rounded.Save, contentDescription = "Save current settings")
-        }
-        IconButton(onClick = onDelete, enabled = selected != null) {
-            Icon(Icons.Rounded.Delete, contentDescription = "Delete selected profile")
-        }
-    }
-}
 
 @Composable
 private fun PercentageSlider(

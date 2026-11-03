@@ -299,6 +299,16 @@ constexpr std::optional<VolumeLevelerConfiguration> read_volume_leveler_configur
             detail::get_u32(message.payload, 16)};
 }
 
+constexpr WireMessage make_active_stream(const ActiveStream& stream) noexcept {
+    WireMessage message{.parameter_id = ParameterId::kActiveStream, .payload_size = 20};
+    detail::put_u32(message.payload, 0, stream.sequence);
+    detail::put_u32(message.payload, 4, stream.sample_rate_hz);
+    detail::put_u32(message.payload, 8, stream.channel_count);
+    detail::put_u32(message.payload, 12, stream.internal_format);
+    detail::put_u32(message.payload, 16, stream.io_format);
+    return message;
+}
+
 constexpr WireMessage make_driver_status(const DriverStatus& status) noexcept {
     WireMessage message{.parameter_id = ParameterId::kDriverStatus, .payload_size = 20};
     detail::put_u32(message.payload, 0, static_cast<std::uint32_t>(status.state));

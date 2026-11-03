@@ -2,6 +2,8 @@
 
 #include "audiofreedom/engine.h"
 #include "audiofreedom/wire.h"
+#include "../common/ChannelLayout.h"
+#include "../common/StreamPublication.h"
 
 #include <android/log.h>
 #include <hardware/audio_effect.h>
@@ -27,6 +29,7 @@ constexpr effect_uuid_t kImplementationUuid = {
         0x2f6e8c10, 0x8d44, 0x4b42, 0xb110, {0x16, 0xf3, 0xa7, 0x29, 0xef, 0x01}};
 constexpr std::array<std::uint8_t, 4> kParameterKey = {'A', 'F', 'X', '1'};
 constexpr std::size_t kScratchSamples = 1024;
+audiofreedom::android::StreamPublication gStreamPublication;
 
 constexpr effect_descriptor_t kDescriptor = {
         .type = kTypeUuid,
@@ -82,9 +85,15 @@ bool validateAndPrepare(EffectModule& module, const effect_config_t& config) {
         return false;
     }
 
+    const bool positional = audio_channel_mask_get_representation(
+            static_cast<audio_channel_mask_t>(config.inputCfg.channels)) == AUDIO_CHANNEL_REPRESENTATION_POSITION &&
+            audio_channel_mask_get_representation(
+            static_cast<audio_channel_mask_t>(config.outputCfg.channels)) == AUDIO_CHANNEL_REPRESENTATION_POSITION;
     if (!module.engine.prepare({
                 .sample_rate_hz = config.inputCfg.samplingRate,
                 .channel_count = static_cast<std::uint32_t>(input_channels),
+                .front_pair_verified = audiofreedom::android::has_matching_front_pair(
+                        config.inputCfg.channels, config.outputCfg.channels, positional),
         })) {
         return false;
     }
@@ -232,6 +241,8 @@ std::optional<WireMessage> queryMessage(const EffectModule& module,
                                         const WireMessage& query) {
     if (query.payload_size != 0) return std::nullopt;
     switch (query.parameter_id) {
+        case ParameterId::kActiveStream:
+            return audiofreedom::protocol::make_active_stream(gStreamPublication.read());
         case ParameterId::kPlaybackAnalysis:
         case ParameterId::kPlaybackSpectrum:
             return audiofreedom::protocol::make_playback_analysis(module.engine.playback_analysis(),
@@ -341,9 +352,15 @@ int32_t effectProcess(effect_handle_t handle, audio_buffer_t* input,
         }
         return 0;
     }
-    return static_cast<audio_format_t>(module->config.inputCfg.format) == AUDIO_FORMAT_PCM_FLOAT
+    const bool float_io = static_cast<audio_format_t>(module->config.inputCfg.format) == AUDIO_FORMAT_PCM_FLOAT;
+    const auto result = float_io
             ? processFloat(*module, *input, *output)
             : processInt16(*module, *input, *output);
+    if (result == 0 && input->frameCount > 0) {
+        const auto config = module->engine.stream_config();
+        gStreamPublication.publish(config.sample_rate_hz, config.channel_count, float_io ? 1 : 2);
+    }
+    return result;
 }
 
 int32_t setParameter(EffectModule& module, std::uint32_t command_size,

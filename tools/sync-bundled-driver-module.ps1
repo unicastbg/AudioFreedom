@@ -52,6 +52,7 @@ $metadata = @(
     "asset=$assetName"
     "version=$($moduleProperties.version)"
     "versionCode=$($moduleProperties.versionCode)"
+    "buildId=$($moduleProperties.buildId)"
     "sha256=$hash"
 ) -join "`n"
 [IO.File]::WriteAllText($metadataPath, "$metadata`n", $utf8NoBom)

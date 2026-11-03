@@ -4,7 +4,7 @@ private const val WireMessageSize = 40
 private const val WireHeaderSize = 16
 private const val Magic = 0x31584641
 private const val ProtocolMajor = 1
-private const val ProtocolMinor = 9
+private const val ProtocolMinor = 10
 private const val ParameterPreamp = 0x1001
 private const val ParameterEqualizerEnabled = 0x1100
 private const val ParameterEqualizerBand = 0x1101
@@ -19,6 +19,7 @@ private const val ParameterOutputMetrics = 0x2001
 private const val ParameterAnalysisEnabled = 0x1800
 private const val ParameterPlaybackAnalysis = 0x2002
 private const val ParameterPlaybackSpectrum = 0x2003
+private const val ParameterActiveStream = 0x2004
 
 internal data class AudioOutputMetrics(
     val inputPeakMillibels: Int,
@@ -27,6 +28,17 @@ internal data class AudioOutputMetrics(
 )
 
 internal object AudioFreedomProtocol {
+    fun enabledQuery(): ByteArray = message(0x1000, 0)
+    fun processingEnabled(enabled: Boolean): ByteArray = message(0x1000, 1).also {
+        it[WireHeaderSize] = if (enabled) 1 else 0
+    }
+
+    fun readEnabled(bytes: ByteArray): Boolean? {
+        if (bytes.size != WireMessageSize || getInt(bytes, 0) != Magic ||
+            getShort(bytes, 4) != ProtocolMajor || getInt(bytes, 8) != 0x1000 ||
+            getInt(bytes, 12) != 1 || bytes[16].toInt() !in 0..1) return null
+        return bytes[16].toInt() == 1
+    }
     fun parameterKey(): ByteArray = byteArrayOf(0x41, 0x46, 0x58, 0x31)
 
     fun preamp(millibels: Int): ByteArray = message(ParameterPreamp, 4).also {
@@ -100,6 +112,22 @@ internal object AudioFreedomProtocol {
         }
 
     fun outputMetricsQuery(): ByteArray = message(ParameterOutputMetrics, 0)
+
+    fun activeStreamQuery(): ByteArray = message(ParameterActiveStream, 0)
+
+    fun readActiveStream(bytes: ByteArray): DspStreamInfo? {
+        if (bytes.size != WireMessageSize || getInt(bytes, 0) != Magic ||
+            getShort(bytes, 4) != ProtocolMajor || getInt(bytes, 8) != ParameterActiveStream ||
+            getInt(bytes, 12) != 20) return null
+        val sequence = getInt(bytes, 16)
+        val rate = getInt(bytes, 20)
+        val channels = getInt(bytes, 24)
+        val internal = getInt(bytes, 28)
+        val io = getInt(bytes, 32)
+        if (sequence == 0 || rate !in 8000..768000 || channels !in 1..32 ||
+            internal != 1 || io !in 1..2) return null
+        return DspStreamInfo(sequence, rate, channels, io)
+    }
 
     fun analysisEnabled(enabled: Boolean): ByteArray = message(ParameterAnalysisEnabled, 1).also {
         it[WireHeaderSize] = if (enabled) 1 else 0

@@ -683,7 +683,7 @@ internal object AssistantCommandPlanner {
         profile: AudioFreedomProfile,
     ) = AssistantPlanResult.Proposed(
         AssistantProposal(
-            title = "Load ${profile.name}",
+            title = "Load ${profile.displayName}",
             explanation = "Replace the current DSP settings with this saved profile.",
             baseSettings = current,
             settings = profile.settings.withEqualizerRange(current.extendedEqualizerRange),
@@ -714,13 +714,18 @@ internal object AssistantCommandPlanner {
             "активирай",
             "използвай",
         )
-        return profiles
-            .sortedByDescending { it.name.length }
-            .firstOrNull { profile ->
-                val profileName = normalizeCommand(profile.name)
-                profileName.isNotBlank() &&
-                    (command == profileName || requestsProfile && command.containsPhrase(profileName))
-            }
+        fun matches(name: String): Boolean {
+            val normalized = normalizeCommand(name)
+            return normalized.isNotBlank() &&
+                (command == normalized || requestsProfile && command.containsPhrase(normalized))
+        }
+        val qualified = profiles.filter { it.deviceGroup.isNotBlank() &&
+            (matches("${it.deviceGroup} ${it.name}") || matches(it.displayName)) }
+        if (qualified.isNotEmpty()) return qualified.singleOrNull()
+        val candidates = profiles.filter { matches(it.name) }
+        val longest = candidates.maxOfOrNull { it.name.length } ?: return null
+        // Never choose an arbitrary device when multiple groups reuse a name.
+        return candidates.filter { it.name.length == longest }.singleOrNull()
     }
 
     internal fun describeChanges(

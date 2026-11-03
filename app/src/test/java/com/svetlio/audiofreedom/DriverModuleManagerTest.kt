@@ -7,6 +7,25 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DriverModuleManagerTest {
+    @Test fun payloadIdentityDetectsSameVersionChangesButNeverDowngrades() {
+        val a = "a".repeat(64)
+        val b = "b".repeat(64)
+        val bundled = DriverModuleInfo("beta", 43, a)
+        assertFalse(bundled.needsBundledUpdate(bundled))
+        assertTrue(DriverModuleInfo("beta", 43, b).needsBundledUpdate(bundled))
+        assertTrue(DriverModuleInfo("beta", 43).needsBundledUpdate(bundled))
+        assertFalse(DriverModuleInfo("future", 44, b).needsBundledUpdate(bundled))
+        assertTrue(DriverModuleInfo("old", 42, a).needsBundledUpdate(bundled))
+    }
+
+    @Test fun stagedMetadataAndLegacyBuildsRemainDistinct() {
+        val id = "a".repeat(64)
+        val info = parseModuleInfo("id=audiofreedom\nversion=beta\nversionCode=43\nbuildId=$id\nstaged=true")!!
+        assertTrue(info.staged)
+        assertEquals(id, info.buildId)
+        assertNull(parseModuleInfo("id=other\nversion=beta\nversionCode=43"))
+        assertNull(parseModuleInfo("id=audiofreedom\nversion=beta\nversionCode=43\nbuildId=bad")?.buildId)
+    }
     @Test
     fun parsesModuleProperties() {
         val properties = parseModuleProperties(

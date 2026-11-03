@@ -280,6 +280,15 @@ internal object AppPreferencesStore {
         }
         editor.apply()
     }
+
+    fun removeProfileAssignments(context: Context, profileId: String) {
+        val preferences = context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
+        val editor = preferences.edit()
+        preferences.all.forEach { (key, value) ->
+            if (key.startsWith(KeyRouteProfilePrefix) && value == profileId) editor.remove(key)
+        }
+        editor.apply()
+    }
 }
 
 private inline fun <reified T : Enum<T>> android.content.SharedPreferences.enumValue(

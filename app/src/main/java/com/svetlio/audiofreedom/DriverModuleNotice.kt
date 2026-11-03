@@ -21,9 +21,11 @@ internal fun needsDriverUpdateNotice(
     bundled: DriverModuleInfo,
     notifiedVersionCode: Int,
     restartPending: Boolean,
-): Boolean = !restartPending && notifiedVersionCode < bundled.versionCode &&
+    notifiedBuildId: String? = null,
+): Boolean = !restartPending &&
+    (if (bundled.buildId != null) notifiedBuildId != bundled.buildId else notifiedVersionCode < bundled.versionCode) &&
     installed is DriverModuleProbeResult.Installed &&
-    installed.info.versionCode < bundled.versionCode
+    !installed.info.staged && installed.info.needsBundledUpdate(bundled)
 
 internal fun isDriverRestartPending(savedBootCount: Int, currentBootCount: Int): Boolean =
     savedBootCount >= 0 && savedBootCount == currentBootCount
@@ -38,8 +40,11 @@ internal object DriverModuleNoticeStore {
     fun notifiedVersionCode(context: Context): Int =
         preferences(context).getInt("notified_version_code", 0)
 
-    fun acknowledge(context: Context, versionCode: Int) {
-        preferences(context).edit().putInt("notified_version_code", versionCode).apply()
+    fun notifiedBuildId(context: Context): String? = preferences(context).getString("notified_build_id", null)
+
+    fun acknowledge(context: Context, versionCode: Int, buildId: String? = null) {
+        preferences(context).edit().putInt("notified_version_code", versionCode)
+            .putString("notified_build_id", buildId).apply()
     }
 
     fun installed(context: Context, rootManager: String) {
@@ -80,22 +85,23 @@ internal fun DriverModuleUpdateNotice(
         val restartPending = DriverModuleNoticeStore.pendingRestart(context) != null
         val result = DriverModuleManager.probeInstalled(context)
         onModuleChecked(result)
-        if (needsDriverUpdateNotice(result, target, notified, restartPending)) {
-            installedVersion = (result as DriverModuleProbeResult.Installed).info.version
+        if (needsDriverUpdateNotice(result, target, notified, restartPending,
+                DriverModuleNoticeStore.notifiedBuildId(context))) {
+            installedVersion = (result as DriverModuleProbeResult.Installed).info.displayVersion()
         }
     }
     val installed = installedVersion ?: return
     val target = bundled ?: return
     fun dismiss() {
-        DriverModuleNoticeStore.acknowledge(context, target.versionCode)
+        DriverModuleNoticeStore.acknowledge(context, target.versionCode, target.buildId)
         installedVersion = null
     }
     AlertDialog(
         onDismissRequest = ::dismiss,
         title = { Text("Driver module update needed") },
         text = {
-            Text("The installed driver is $installed. This app includes driver ${target.version}. " +
-                "Update the driver module to use the latest DSP features, including extended EQ. " +
+            Text("The installed driver is $installed. This app includes driver ${target.displayVersion()}. " +
+                "Update the driver module to use the matching DSP build. " +
                 "Install the bundled update in Settings, then restart your phone. " +
                 "Your settings and profiles are retained.",
                 modifier = Modifier.verticalScroll(rememberScrollState()))

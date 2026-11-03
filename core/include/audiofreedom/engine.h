@@ -12,6 +12,7 @@ namespace audiofreedom {
 struct StreamConfig {
     std::uint32_t sample_rate_hz = 0;
     std::uint32_t channel_count = 0;
+    bool front_pair_verified = false;
 };
 
 struct OutputMetrics final {
@@ -232,6 +233,8 @@ private:
     std::array<float, kMaxChannelCount> detail_lowpass_state_{};
     float detail_fast_envelope_ = 0.0F;
     float detail_slow_envelope_ = 0.0F;
+    // Recent broadband level, so the detail noise guard is relative to the music.
+    float detail_reference_envelope_ = 0.0F;
     float immersive_side_lowpass_ = 0.0F;
     float immersive_crossfeed_left_ = 0.0F;
     float immersive_crossfeed_right_ = 0.0F;

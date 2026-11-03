@@ -318,6 +318,8 @@ internal fun CassetteHero(
     peakMillibels: Int?,
     spectrumMillibels: List<Int>?,
     onProcessingChange: (Boolean) -> Unit,
+    streamLabel: String? = null,
+    processingHealth: ProcessingHealth = ProcessingHealth.Global,
 ) {
     val colors = MaterialTheme.colorScheme
     val levels = animatedBandLevels(spectrumMillibels, processing)
@@ -367,7 +369,7 @@ internal fun CassetteHero(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        if (processing) "PROCESSING ON" else "STANDBY",
+                        if (processing) processingHealth.title.uppercase(Locale.US) else "STANDBY",
                         style = lcd.copy(fontSize = 14.sp),
                         maxLines = 1,
                         modifier = Modifier.weight(1.2F),
@@ -380,6 +382,10 @@ internal fun CassetteHero(
                         modifier = Modifier.weight(1F).padding(start = 8.dp),
                     )
                 }
+                Text(if (processing) streamLabel ?: "DSP format unavailable / idle" else "DSP bypassed",
+                    style = lcd.copy(color = LcdDim, fontSize = 11.sp))
+                if (processing) processingHealth.detail?.let { Text(it,
+                    style = lcd.copy(color = LcdDim, fontSize = 11.sp)) }
                 Canvas(
                     Modifier
                         .fillMaxWidth()

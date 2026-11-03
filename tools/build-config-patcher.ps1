@@ -40,7 +40,7 @@ New-Item -ItemType Directory -Path $classes,$dex | Out-Null
 
 & $javac -encoding UTF-8 --release 17 -d $classes $source
 if ($LASTEXITCODE -ne 0) { throw "javac failed" }
-& $jar --create --file $classesJar -C $classes .
+& $jar --create --date=1980-01-01T00:00:02Z --file $classesJar -C $classes .
 if ($LASTEXITCODE -ne 0) { throw "jar failed" }
 $previousJavaHome = $env:JAVA_HOME
 try {
@@ -50,7 +50,7 @@ try {
 } finally {
     $env:JAVA_HOME = $previousJavaHome
 }
-& $jar --create --file $outputJar -C $dex classes.dex
+& $jar --create --date=1980-01-01T00:00:02Z --file $outputJar -C $dex classes.dex
 if ($LASTEXITCODE -ne 0) { throw "Dex jar packaging failed" }
 
 $fixture = Join-Path $projectRoot "tests\fixtures\audio_effects_minimal.xml"

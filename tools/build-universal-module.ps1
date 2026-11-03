@@ -102,6 +102,22 @@ $buildInfo = @(
 [IO.File]::WriteAllText((Join-Path $packageRoot "build-info.txt"),
     "$buildInfo`n", $utf8NoBom)
 
+# Identify payload contents, not ZIP timestamps or the companion APK build.
+$manifest = (Get-ChildItem -LiteralPath $packageRoot -Recurse -File |
+    Sort-Object FullName | ForEach-Object {
+        $relative = $_.FullName.Substring($packageRoot.Length + 1).Replace("\", "/")
+        "$relative=$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"
+    }) -join "`n"
+$digest = [Security.Cryptography.SHA256]::Create()
+try {
+    $buildId = [Convert]::ToHexString($digest.ComputeHash($utf8NoBom.GetBytes($manifest))).ToLowerInvariant()
+} finally { $digest.Dispose() }
+foreach ($name in @("module.prop", "build-info.txt")) {
+    $path = Join-Path $packageRoot $name
+    $contents = [IO.File]::ReadAllText($path).Replace("`r`n", "`n").TrimEnd()
+    [IO.File]::WriteAllText($path, "$contents`nbuildId=$buildId`n", $utf8NoBom)
+}
+
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [IO.Compression.ZipFile]::Open(

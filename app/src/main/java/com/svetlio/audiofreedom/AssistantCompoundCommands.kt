@@ -48,8 +48,11 @@ internal object AssistantCompoundCommands {
         // Keep profile names containing conjunctions intact when the entire name is requested.
         val text = normalize(command).trimEnd('.', '!', '?')
         if (text in setOf("make the bass deeper and stronger", "the vocals sound harsh and sharp", "искам повече и по-дълбок бас")) return null
-        if (profiles.any { profile -> text == profile.name.lowercase(Locale.ROOT) ||
-                text in listOf("load profile ${profile.name.lowercase(Locale.ROOT)}", "switch profile to ${profile.name.lowercase(Locale.ROOT)}") }) return null
+        if (profiles.any { profile ->
+                listOf(profile.name, "${profile.deviceGroup} ${profile.name}".trim(), profile.displayName)
+                    .map(::normalize).any { name -> text == name ||
+                        text in listOf("load profile $name", "switch profile to $name") }
+            }) return null
         val clauses = separator.split(text).map(String::trim).filter(String::isNotBlank)
         if (clauses.size < 2) {
             val normalized = canonical(text)

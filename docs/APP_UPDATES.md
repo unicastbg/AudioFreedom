@@ -18,6 +18,11 @@ the universal ZIP from the same GitHub release manually in that manager and rebo
 
 Settings > Updates > Check updates checks both the companion app and the driver module.
 
+Release highlights are intentionally short. Starting with 1.0.0, the updater shows
+up to three plain-text bullets from the trusted release body's `## Highlights` section.
+The first launch of 1.0.0 also shows its three highlights once, including the LOS 24
+fix, so an upgrade from a build without the new updater UI still sees the changes.
+
 For an available app update:
 
 1. Select Download. Android's Download Manager downloads the APK in the background.
@@ -35,13 +40,35 @@ updating the app, use the driver module's Install or Update action if offered, t
 The updater never installs APKs using root and never bypasses Android's confirmation.
 Existing settings and profiles are retained by a normal signed upgrade.
 
+## Driver Build Identity
+
+Local builds now include a SHA-256 payload identity in module.prop and the APK's bundled
+metadata. It is derived from packaged file contents, not ZIP timestamps. Repackaging the
+same inputs keeps the identity; changing a native backend or installer changes it.
+Settings shows its short build ID beside the visible driver version.
+
+The app offers Update if the bundled version is newer or the same version has a different
+payload identity. A legacy module without an ID needs one matching update. An identical
+build offers Reinstall for repair. A newer installed version is not silently downgraded.
+App-only changes that retain the driver payload do not require reinstalling it.
+
+The root probe checks staged modules before active ones, so an external module-manager
+installation pending activation is shown as requiring a reboot. Successful in-app installs
+retain their restart notice until the boot count changes. Restart always requires explicit
+confirmation. The one-time main-screen notice is keyed to payload ID, not just version.
+GitHub update discovery remains version-based; it does not treat a republished same-version
+remote archive as a new release.
+
 Downloads continue if the Settings page is closed, and pending state is restored on return.
 Use the cancel icon to remove a pending update. If the release lacks a trusted APK,
 valid file digest, or acceptable size, View on GitHub remains available for manual download.
 Only the AudioFreedom repository's canonical release APK is eligible for direct download.
 
-GitHub checks and downloads require internet access. No audio, assistant commands,
-profiles, or other app settings are sent as part of the update check.
+GitHub checks and downloads require internet access. If the updater can't reach GitHub,
+check your connection and use **App info** to review AudioFreedom's network access.
+Some ROMs, including LineageOS, can block network access for an individual app.
+No audio, assistant commands, profiles, or other app settings are sent as part of
+the update check.
 
 Android references: [DownloadManager](https://developer.android.com/reference/android/app/DownloadManager),
 [FileProvider](https://developer.android.com/reference/androidx/core/content/FileProvider),

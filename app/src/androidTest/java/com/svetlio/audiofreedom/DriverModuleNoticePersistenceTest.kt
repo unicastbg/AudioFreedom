@@ -34,6 +34,15 @@ class DriverModuleNoticePersistenceTest {
     @Before fun setUp() { prefs.edit().clear().commit() }
     @After fun tearDown() { prefs.edit().clear().commit() }
 
+    @Test fun acknowledgementPersistsTheExactDriverBuild() {
+        val buildId = "a".repeat(64)
+        DriverModuleNoticeStore.acknowledge(context, 43, buildId)
+        assertEquals(43, DriverModuleNoticeStore.notifiedVersionCode(context))
+        assertEquals(buildId, DriverModuleNoticeStore.notifiedBuildId(context))
+        DriverModuleNoticeStore.acknowledge(context, 43, "b".repeat(64))
+        assertEquals("b".repeat(64), DriverModuleNoticeStore.notifiedBuildId(context))
+    }
+
     @Test fun noticeAndPendingRestartSurviveReloadAndClearAfterAnotherBoot() {
         DriverModuleNoticeStore.acknowledge(context, 43)
         assertEquals(43, DriverModuleNoticeStore.notifiedVersionCode(context))

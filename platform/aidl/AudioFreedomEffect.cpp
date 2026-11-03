@@ -1,6 +1,8 @@
 #define LOG_TAG "AHAL_AudioFreedomEffect"
 
 #include "AudioFreedomEffect.h"
+#include "../common/ChannelLayout.h"
+#include "../common/StreamPublication.h"
 
 #include <aidl/android/hardware/audio/effect/DefaultExtension.h>
 #include <android-base/logging.h>
@@ -109,6 +111,7 @@ std::atomic<int32_t> gGainReductionMillibels{0};
 std::atomic<uint64_t> gSettingsRevision{1};
 audiofreedom::AnalysisLease gAnalysisLease;
 audiofreedom::AnalysisPublication gAnalysisPublication;
+audiofreedom::android::StreamPublication gStreamPublication;
 
 std::optional<audiofreedom::protocol::WireMessage> decodeDirectWire(
         const std::vector<uint8_t>& bytes) {
@@ -241,9 +244,18 @@ RetCode AudioFreedomEffectContext::prepareEngine(const Parameter::Common& common
         return RetCode::ERROR_ILLEGAL_PARAMETER;
     }
 
+    using ::aidl::android::media::audio::common::AudioChannelLayout;
+    const auto& input_layout = common.input.base.channelMask;
+    const auto& output_layout = common.output.base.channelMask;
+    const bool positional = input_layout.getTag() == AudioChannelLayout::Tag::layoutMask &&
+                            output_layout.getTag() == AudioChannelLayout::Tag::layoutMask;
+    const bool front_pair = positional && audiofreedom::android::has_matching_front_pair(
+            static_cast<uint32_t>(input_layout.get<AudioChannelLayout::Tag::layoutMask>()),
+            static_cast<uint32_t>(output_layout.get<AudioChannelLayout::Tag::layoutMask>()), true);
     mPrepared = mEngine.prepare({
             .sample_rate_hz = static_cast<uint32_t>(common.input.base.sampleRate),
             .channel_count = static_cast<uint32_t>(inputChannels),
+            .front_pair_verified = front_pair,
     });
     return mPrepared ? RetCode::SUCCESS : RetCode::ERROR_ILLEGAL_PARAMETER;
 }
@@ -668,6 +680,9 @@ std::optional<std::vector<uint8_t>> AudioFreedomEffectContext::getParams(
             };
             return encodeWireResponse(id, audiofreedom::protocol::make_output_metrics(metrics));
         }
+        case ParameterId::kActiveStream:
+            return encodeWireResponse(id, audiofreedom::protocol::make_active_stream(
+                    gStreamPublication.read()));
         case ParameterId::kPlaybackAnalysis:
         case ParameterId::kPlaybackSpectrum:
             return encodeWireResponse(id, audiofreedom::protocol::make_playback_analysis(
@@ -695,6 +710,7 @@ IEffect::Status AudioFreedomEffectContext::process(float* in, float* out, const 
     if (!mEngine.process(out, static_cast<std::size_t>(samples) / channelCount)) {
         return {EX_ILLEGAL_STATE, 0, 0};
     }
+    gStreamPublication.publish(mEngine.stream_config().sample_rate_hz, channelCount, 1);
     if (analyze) {
         const auto analysis = mEngine.playback_analysis();
         if (analysis.sequence != 0 && analysis.sequence != previousAnalysis)

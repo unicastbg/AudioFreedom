@@ -27,6 +27,12 @@ private const val TAG = "AudioFreedom"
 
 internal fun shouldApplyAssignedProfileOnServiceStart(action: String?): Boolean = action == null
 
+internal fun shouldApplyDeviceProfile(
+    routeChanged: Boolean, force: Boolean, requested: Boolean, automatic: Boolean,
+): Boolean = (routeChanged || force) && requested && automatic
+
+internal fun isMediaProcessingMode(mode: Int): Boolean = mode == AudioManager.MODE_NORMAL
+
 internal val EffectImplementationUuid: UUID =
     UUID.fromString("2f6e8c10-8d44-4b42-b110-16f3a729ef01")
 private val EffectTypeUuid: UUID =
@@ -50,15 +56,31 @@ internal fun probeDriver(): DriverState = try {
     DriverState.ProbeFailed
 }
 
-private class SessionZeroEffectController {
+internal class PlatformEffectController(private val sessionId: Int) : EffectClient {
     private var effect: AudioEffect? = null
     private val setParameterMethod by lazy { resolveByteArrayMethod("setParameter") }
     private val getParameterMethod by lazy { resolveByteArrayMethod("getParameter") }
 
-    val isAttached: Boolean
+    override val isAttached: Boolean
         get() = effect != null
+    override val frameworkEnabled: Boolean get() = runCatching { effect?.enabled == true }.getOrDefault(false)
+    override val driverEnabled: Boolean? get() = try {
+        val current = effect
+        if (current == null) null else {
+            val bytes = ByteArray(40)
+            val count = getParameterMethod.invoke(current, AudioFreedomProtocol.enabledQuery(), bytes) as Int
+            if (count == bytes.size) AudioFreedomProtocol.readEnabled(bytes) else null
+        }
+    } catch (_: Exception) { null }
 
-    fun attach(settings: AudioFreedomSettings): DriverState {
+    override fun setFrameworkEnabled(enabled: Boolean): Boolean = runCatching {
+        effect?.setEnabled(enabled) == AudioEffect.SUCCESS
+    }.getOrDefault(false)
+    override fun setProcessingEnabled(enabled: Boolean): Boolean = effect?.let {
+        sendParameter(it, AudioFreedomProtocol.processingEnabled(enabled))
+    } ?: false
+
+    override fun attach(settings: AudioFreedomSettings): DriverState {
         release()
         val probeState = probeDriver()
         if (probeState != DriverState.Detected) {
@@ -76,16 +98,19 @@ private class SessionZeroEffectController {
                 EffectTypeUuid,
                 EffectImplementationUuid,
                 0,
-                0,
+                sessionId,
             )
-            created.enabled = true
             effect = created
             if (!applySettings(settings)) {
                 release()
                 Log.e(TAG, "Session 0 effect attached but rejected DSP settings")
                 return DriverState.ParameterError
             }
-            Log.i(TAG, "Session 0 effect attached and enabled")
+            if (!setFrameworkEnabled(true)) {
+                release()
+                return DriverState.ParameterError
+            }
+            Log.i(TAG, "Effect attached to session $sessionId")
             DriverState.Attached
         } catch (error: ReflectiveOperationException) {
             Log.e(TAG, "Session 0 effect attachment failed", rootCause(error))
@@ -96,13 +121,16 @@ private class SessionZeroEffectController {
         }
     }
 
-    fun release() {
-        effect?.let { sendParameter(it, AudioFreedomProtocol.analysisEnabled(false)) }
-        effect?.release()
+    override fun release() {
+        effect?.let {
+            runCatching { if (it.hasControl()) it.setEnabled(false) }
+            sendParameter(it, AudioFreedomProtocol.analysisEnabled(false))
+            it.release()
+        }
         effect = null
     }
 
-    fun applySettings(settings: AudioFreedomSettings): Boolean {
+    override fun applySettings(settings: AudioFreedomSettings): Boolean {
         val currentEffect = effect ?: return false
         val equalizerConfigured = sendParameter(
                 currentEffect,
@@ -158,7 +186,7 @@ private class SessionZeroEffectController {
         return false
     }
 
-    fun queryOutputMetrics(): AudioOutputMetrics? {
+    override fun queryOutputMetrics(): AudioOutputMetrics? {
         val currentEffect = effect ?: return null
         return try {
             val response = ByteArray(40)
@@ -181,11 +209,22 @@ private class SessionZeroEffectController {
         }
     }
 
-    fun setAnalysisEnabled(enabled: Boolean): Boolean = effect?.let {
+    override fun queryActiveStream(): DspStreamInfo? {
+        val currentEffect = effect ?: return null
+        return try {
+            val response = ByteArray(40)
+            val count = getParameterMethod.invoke(currentEffect, AudioFreedomProtocol.activeStreamQuery(), response) as Int
+            if (count == response.size) AudioFreedomProtocol.readActiveStream(response) else null
+        } catch (_: ReflectiveOperationException) { null }
+          catch (_: SecurityException) { null }
+          catch (_: RuntimeException) { null }
+    }
+
+    override fun setAnalysisEnabled(enabled: Boolean): Boolean = effect?.let {
         sendParameter(it, AudioFreedomProtocol.analysisEnabled(enabled))
     } ?: false
 
-    fun queryPlaybackAnalysis(): PlaybackAnalysis? {
+    override fun queryPlaybackAnalysis(): PlaybackAnalysis? {
         val currentEffect = effect ?: return null
         return try {
             repeat(2) {
@@ -241,15 +280,26 @@ private class SessionZeroEffectController {
 }
 
 class AudioFreedomService : Service() {
-    private val effectController = SessionZeroEffectController()
+    private val effectController by lazy { EffectRoutingController(this) }
     private val meterHandler = Handler(Looper.getMainLooper())
     private var foregroundStarted = false
     private var notificationPresentation: NotificationPresentation? = null
     private val analysisTracker = PlaybackAnalysisTracker()
+    private val streamTracker = DspStreamTracker()
     private var analysisWasRequested = false
+    private var telemetrySource = 0
     private val meterPoll = object : Runnable {
         override fun run() {
+            effectController.checkHealth()
+            currentHealth = effectController.health
+            if (telemetrySource != effectController.telemetrySource) {
+                telemetrySource = effectController.telemetrySource
+                streamTracker.reset()
+                analysisTracker.reset()
+            }
             currentOutputMetrics = effectController.queryOutputMetrics()
+            currentStreamFrame = streamTracker.update(effectController.queryActiveStream(), SystemClock.elapsedRealtime())
+            updateForegroundNotification(isPaused = false)
             if (analysisRequested) {
                 analysisWasRequested = true
                 analysisSupported = effectController.setAnalysisEnabled(true)
@@ -307,6 +357,7 @@ class AudioFreedomService : Service() {
             audioManager.mode,
             forceSettings = intent?.action == ACTION_APPLY_SETTINGS ||
                 intent?.action == ACTION_REFRESH_STATUS,
+            retryRecovery = intent?.action == ACTION_REFRESH_STATUS,
         )
         return START_STICKY
     }
@@ -319,6 +370,7 @@ class AudioFreedomService : Service() {
         meterHandler.removeCallbacks(routeRefresh)
         effectController.release()
         stopMetering()
+        currentHealth = ProcessingHealth.Global
         currentState = probeDriver()
         super.onDestroy()
     }
@@ -344,14 +396,15 @@ class AudioFreedomService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
-    private fun applyAudioMode(mode: Int, forceSettings: Boolean = false) {
-        if (mode == AudioManager.MODE_NORMAL) {
+    private fun applyAudioMode(mode: Int, forceSettings: Boolean = false, retryRecovery: Boolean = false) {
+        if (isMediaProcessingMode(mode)) {
             val settings = AudioFreedomSettingsStore.load(this)
             if (!effectController.isAttached) {
                 currentState = effectController.attach(settings)
             } else if (forceSettings && !effectController.applySettings(settings)) {
                 currentState = DriverState.ParameterError
             }
+            if (retryRecovery) effectController.retryRecovery()
             if (currentState != DriverState.Attached) {
                 setRequestedEnabled(this, false)
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -368,6 +421,7 @@ class AudioFreedomService : Service() {
 
         effectController.release()
         stopMetering()
+        currentHealth = ProcessingHealth.Call
         currentState = probeDriver()
         updateForegroundNotification(isPaused = true)
         Log.i(TAG, "Processing bypassed for audio mode $mode")
@@ -381,6 +435,8 @@ class AudioFreedomService : Service() {
     private fun stopMetering() {
         meterHandler.removeCallbacks(meterPoll)
         currentOutputMetrics = null
+        streamTracker.reset()
+        currentStreamFrame = null
         analysisTracker.reset()
         analysisWasRequested = false
         currentPlaybackAnalysis = null
@@ -406,7 +462,7 @@ class AudioFreedomService : Service() {
 
     private fun createNotificationPresentation(isPaused: Boolean): NotificationPresentation {
         val preferences = AppPreferencesStore.load(this)
-        val processingState = if (isPaused) "Paused during call" else "Processing enabled"
+        val processingState = if (isPaused) "Paused during call" else currentHealth.title
         val content = if (preferences.showDeviceInNotification) {
             "$processingState - ${currentAudioRoute.label}"
         } else {
@@ -456,11 +512,14 @@ class AudioFreedomService : Service() {
     ) {
         val route = AudioRouteDetector.current(this)
         val routeChanged = route.id != currentAudioRoute.id
+        if (routeChanged) {
+            streamTracker.reset()
+            currentStreamFrame = null
+        }
         currentAudioRoute = route
 
-        if ((routeChanged || forceAssignedProfile) && applyAssignedProfile &&
-            AppPreferencesStore.load(this).automaticDeviceProfiles
-        ) {
+        if (shouldApplyDeviceProfile(routeChanged, forceAssignedProfile, applyAssignedProfile,
+                AppPreferencesStore.load(this).automaticDeviceProfiles)) {
             val profileId = AppPreferencesStore.profileForRoute(this, route.id)
             val profile = AudioFreedomProfileStore.list(this).firstOrNull { it.id == profileId }
             if (profile != null) {
@@ -497,9 +556,13 @@ class AudioFreedomService : Service() {
         @Volatile
         internal var currentState: DriverState = DriverState.Detected
             private set
+        @Volatile internal var currentHealth: ProcessingHealth = ProcessingHealth.Global
+            private set
 
         @Volatile
         internal var currentOutputMetrics: AudioOutputMetrics? = null
+            private set
+        @Volatile internal var currentStreamFrame: DspStreamFrame? = null
             private set
 
         @Volatile internal var currentPlaybackAnalysis: PlaybackAnalysisFrame? = null
@@ -536,6 +599,7 @@ class AudioFreedomService : Service() {
                 context.stopService(Intent(context, AudioFreedomService::class.java))
                 currentState = probeDriver()
                 currentOutputMetrics = null
+                currentStreamFrame = null
                 return currentState
             }
 

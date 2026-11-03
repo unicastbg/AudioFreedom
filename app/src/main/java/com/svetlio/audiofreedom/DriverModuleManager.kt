@@ -16,7 +16,16 @@ import org.json.JSONObject
 internal data class DriverModuleInfo(
     val version: String,
     val versionCode: Int,
+    val buildId: String? = null,
+    val staged: Boolean = false,
 )
+
+internal fun DriverModuleInfo.needsBundledUpdate(bundled: DriverModuleInfo): Boolean =
+    versionCode < bundled.versionCode || (versionCode == bundled.versionCode &&
+        bundled.buildId != null && buildId != bundled.buildId)
+
+internal fun DriverModuleInfo.displayVersion(): String = version +
+    (buildId?.let { " (build ${it.take(8)})" } ?: " (legacy build)")
 
 internal sealed interface DriverModuleProbeResult {
     data class Installed(val info: DriverModuleInfo) : DriverModuleProbeResult
@@ -72,10 +81,11 @@ internal object DriverModuleManager {
 
             val command = """
                 for path in \
-                    /data/adb/modules/$ModuleId/module.prop \
-                    /data/adb/modules_update/$ModuleId/module.prop; do
+                    /data/adb/modules_update/$ModuleId/module.prop \
+                    /data/adb/modules/$ModuleId/module.prop; do
                     if [ -r "${'$'}path" ]; then
                         cat "${'$'}path"
+                        case "${'$'}path" in */modules_update/*) echo; echo staged=true;; esac
                         exit 0
                     fi
                 done
@@ -456,20 +466,22 @@ private fun parseBundledMetadata(properties: Properties): BundledDriverModule {
         version = version,
         versionCode = properties.getProperty("versionCode")?.toIntOrNull()
             ?.takeIf { it > 0 } ?: error("Invalid bundled module version code"),
+        buildId = parseSha256Digest(properties.getProperty("buildId").orEmpty()),
     )
     val digest = parseSha256Digest(properties.getProperty("sha256").orEmpty())
         ?: error("Invalid bundled module digest")
     return BundledDriverModule(assetName, info, digest)
 }
 
-private fun parseModuleInfo(contents: String): DriverModuleInfo? =
+internal fun parseModuleInfo(contents: String): DriverModuleInfo? =
     moduleInfo(parseModuleProperties(contents))
 
 private fun moduleInfo(properties: Map<String, String>): DriverModuleInfo? {
     if (properties["id"] != "audiofreedom") return null
     val version = properties["version"]?.takeIf(String::isNotBlank) ?: return null
     val versionCode = properties["versionCode"]?.toIntOrNull()?.takeIf { it > 0 } ?: return null
-    return DriverModuleInfo(version, versionCode)
+    return DriverModuleInfo(version, versionCode,
+        parseSha256Digest(properties["buildId"].orEmpty()), properties["staged"] == "true")
 }
 
 private fun isTrustedDownloadUrl(value: String): Boolean = runCatching {

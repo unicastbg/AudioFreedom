@@ -8,7 +8,10 @@ internal data class AudioFreedomProfile(
     val id: String,
     val name: String,
     val settings: AudioFreedomSettings,
-)
+    val deviceGroup: String = "",
+) {
+    val displayName: String get() = listOf(deviceGroup, name).filter(String::isNotBlank).joinToString(" / ")
+}
 
 internal object AudioFreedomProfileStore {
     private const val Preferences = "audiofreedom_profiles"
@@ -29,6 +32,7 @@ internal object AudioFreedomProfileStore {
         name: String,
         settings: AudioFreedomSettings,
         profileId: String? = null,
+        deviceGroup: String? = null,
     ): AudioFreedomProfile {
         val normalizedName = name.trim()
         require(normalizedName.isNotEmpty())
@@ -36,19 +40,25 @@ internal object AudioFreedomProfileStore {
 
         val preferences = context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
         val existingProfiles = preferences.getStringSet(KeyProfileIds, emptySet()).orEmpty()
+        val group = (deviceGroup ?: profileId?.let {
+            preferences.getString(key(it, "device_group"), "")
+        }).orEmpty().trim().take(100)
         val id = profileId ?: existingProfiles.firstOrNull { existingId ->
             preferences.getString(key(existingId, "name"), null)
-                ?.equals(normalizedName, ignoreCase = true) == true
+                ?.equals(normalizedName, ignoreCase = true) == true &&
+                preferences.getString(key(existingId, "device_group"), "").orEmpty()
+                    .equals(group, ignoreCase = true)
         } ?: UUID.randomUUID().toString()
         val ids = existingProfiles.toMutableSet().apply { add(id) }
 
         preferences.edit()
             .putStringSet(KeyProfileIds, ids)
             .putString(key(id, "name"), normalizedName)
+            .putString(key(id, "device_group"), group)
             .putSettings(id, settings)
             .apply()
 
-        return AudioFreedomProfile(id, normalizedName, settings)
+        return AudioFreedomProfile(id, normalizedName, settings, group)
     }
 
     fun delete(context: Context, profileId: String) {
@@ -57,9 +67,11 @@ internal object AudioFreedomProfileStore {
         ids.remove(profileId)
 
         val editor = preferences.edit().putStringSet(KeyProfileIds, ids)
+        editor.remove(key(profileId, "device_group"))
         profileFields.forEach { field -> editor.remove(key(profileId, field)) }
         repeat(EqualizerBandCount) { band -> editor.remove(key(profileId, "band_$band")) }
         editor.apply()
+        AppPreferencesStore.removeProfileAssignments(context, profileId)
     }
 
     private fun readProfile(
@@ -73,6 +85,7 @@ internal object AudioFreedomProfileStore {
         return AudioFreedomProfile(
             id = id,
             name = name,
+            deviceGroup = preferences.getString(key(id, "device_group"), "").orEmpty(),
             settings = AudioFreedomSettings(
                 equalizerEnabled = preferences.getBoolean(
                     key(id, "equalizer_enabled"), defaults.equalizerEnabled,

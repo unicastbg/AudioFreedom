@@ -130,6 +130,8 @@ internal fun ProcessingHeroCard(
     spectrumSupported: Boolean?,
     onProcessingChange: (Boolean) -> Unit,
     outputRmsMillibels: Int? = null,
+    streamLabel: String? = null,
+    processingHealth: ProcessingHealth = ProcessingHealth.Global,
 ) {
     val style = LocalLayoutStyle.current
     val look = LocalThemeLook.current
@@ -161,6 +163,8 @@ internal fun ProcessingHeroCard(
             peakMillibels = outputPeakMillibels,
             spectrumMillibels = spectrumMillibels,
             onProcessingChange = onProcessingChange,
+            streamLabel = streamLabel,
+            processingHealth = processingHealth,
         )
         return
     }
@@ -199,6 +203,8 @@ internal fun ProcessingHeroCard(
                     }
                     Text(
                         when {
+                            processing && processingHealth != ProcessingHealth.Global &&
+                                processingHealth != ProcessingHealth.Sessions -> processingHealth.title
                             rack && processing -> "ENGAGED"
                             rack -> "BYPASSED"
                             processing -> "Processing on"
@@ -213,6 +219,13 @@ internal fun ProcessingHeroCard(
                         color = subtleText,
                         style = MaterialTheme.typography.bodyMedium,
                     )
+                    Text(
+                        if (processing) streamLabel ?: "DSP format unavailable / idle" else "DSP bypassed",
+                        color = subtleText,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    if (processing) processingHealth.detail?.let { Text(it,
+                        color = subtleText, style = MaterialTheme.typography.bodySmall) }
                     when (rootAccessState) {
                         RootAccessState.Checking -> Text(
                             "Checking root access",
@@ -490,111 +503,6 @@ private fun PeakMeter(peakMillibels: Int?) {
 
 // ------------------------------------------------------------------ Profiles
 
-@Composable
-internal fun ProfileChipsRow(
-    profiles: List<AudioFreedomProfile>,
-    selectedProfileId: String?,
-    profileModified: Boolean,
-    onProfileSelected: (AudioFreedomProfile) -> Unit,
-    onAdd: () -> Unit,
-    onSave: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    val colors = MaterialTheme.colorScheme
-    val rack = LocalLayoutStyle.current == LayoutStyle.Rack
-    val selected = profiles.firstOrNull { it.id == selectedProfileId }
-    var menuExpanded by remember { mutableStateOf(false) }
-    Column(
-        Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                if (rack) "PROFILE SLOT" else "Profile",
-                color = colors.onSurfaceVariant,
-                style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.weight(1F),
-            )
-            Box {
-                IconButton(onClick = { menuExpanded = true }) {
-                    Icon(Icons.Rounded.MoreVert, contentDescription = "Profile actions")
-                }
-                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                    DropdownMenuItem(
-                        text = { Text(selected?.let { "Save changes to ${it.name}" } ?: "Save changes") },
-                        enabled = selected != null,
-                        onClick = {
-                            menuExpanded = false
-                            onSave()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Save as new profile…") },
-                        onClick = {
-                            menuExpanded = false
-                            onAdd()
-                        },
-                    )
-                    HorizontalDivider()
-                    // Delete lives in the menu, away from Save, so it can't be hit by accident.
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                selected?.let { "Delete ${it.name}" } ?: "Delete profile",
-                                color = if (selected != null) colors.error else Color.Unspecified,
-                            )
-                        },
-                        enabled = selected != null,
-                        onClick = {
-                            menuExpanded = false
-                            onDelete()
-                        },
-                    )
-                }
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (profiles.isEmpty()) {
-                Text(
-                    "No saved profiles yet",
-                    color = colors.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-            profiles.forEachIndexed { index, profile ->
-                val isSelected = profile.id == selectedProfileId
-                ChoiceChip(
-                    label = profile.name + if (isSelected && profileModified) " •" else "",
-                    slot = if (rack && index < 26) ('A' + index).toString() else null,
-                    selected = isSelected,
-                    onClick = { onProfileSelected(profile) },
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .size(if (rack) 52.dp else 40.dp)
-                    .clip(if (rack) MaterialTheme.shapes.small else CircleShape)
-                    .border(
-                        1.dp,
-                        colors.outlineVariant,
-                        if (rack) MaterialTheme.shapes.small else CircleShape,
-                    )
-                    .clickable(role = Role.Button, onClick = onAdd),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Rounded.Add,
-                    contentDescription = "Save as new profile",
-                    tint = colors.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
 
 @Composable
 private fun ChoiceChip(

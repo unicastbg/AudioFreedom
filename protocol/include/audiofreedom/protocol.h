@@ -8,7 +8,7 @@ namespace audiofreedom::protocol {
 
 inline constexpr std::uint32_t kMagic = 0x31584641;  // "AFX1" in little-endian wire order.
 inline constexpr std::uint16_t kProtocolMajor = 1;
-inline constexpr std::uint16_t kProtocolMinor = 9;
+inline constexpr std::uint16_t kProtocolMinor = 10;
 
 enum class ParameterId : std::uint32_t {
     kProtocolVersion = 0x0000,
@@ -28,6 +28,7 @@ enum class ParameterId : std::uint32_t {
     kOutputMetrics = 0x2001,
     kPlaybackAnalysis = 0x2002,
     kPlaybackSpectrum = 0x2003,
+    kActiveStream = 0x2004,
 };
 
 struct EqualizerBandGain final {
@@ -81,6 +82,15 @@ struct OutputMetrics final {
     std::int32_t input_peak_millibels = -12000;
     std::int32_t output_peak_millibels = -12000;
     std::int32_t gain_reduction_millibels = 0;
+};
+
+// Latest successful PCM callback, not the app's control-session configuration.
+struct ActiveStream final {
+    std::uint32_t sequence = 0;
+    std::uint32_t sample_rate_hz = 0;
+    std::uint32_t channel_count = 0;
+    std::uint32_t internal_format = 1;  // float32
+    std::uint32_t io_format = 1;  // 1: float32, 2: signed PCM16
 };
 
 struct VolumeLevelerConfiguration final {

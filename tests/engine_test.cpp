@@ -1,8 +1,10 @@
 #include "audiofreedom/engine.h"
 #include "audiofreedom/protocol.h"
 #include "audiofreedom/wire.h"
+#include "../platform/common/ChannelLayout.h"
 
 #include <cmath>
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdlib>
@@ -521,6 +523,119 @@ void test_detail_recovery_targets_high_frequencies_and_transients() {
            "detail transient control did not increase transient emphasis");
 }
 
+float measure_detail_gain_at(const float frequency_hz, const float amplitude,
+                            const std::uint32_t transients = 0,
+                            const bool pulsed = false,
+                            const std::uint32_t rate = 48000) {
+    audiofreedom::Engine engine;
+    expect(engine.prepare({rate, 1}), "detail level stream must prepare");
+    engine.set_preamp_millibels(0);
+    engine.set_limiter_enabled(false);
+    engine.set_detail_recovery_enabled(true);
+    engine.set_detail_amount_percent(100);
+    engine.set_detail_focus_hz(6000);
+    engine.set_detail_transients_percent(transients);
+    engine.set_enabled(true);
+    const std::size_t sample_count = rate;
+    std::vector<float> samples(sample_count);
+    std::vector<float> input(sample_count);
+    for (std::size_t index = 0; index < sample_count; ++index) {
+        // Music-like: a low tone carrying the level, plus a quieter high band.
+        const float time = static_cast<float>(index) / static_cast<float>(rate);
+        const float high_envelope = pulsed && index % (rate / 10) >= rate / 50 ? 0.03F : 1.0F;
+        samples[index] = amplitude * (std::sin(2.0F * 3.14159265358979323846F * 220.0F * time) +
+                high_envelope * 0.25F * std::sin(2.0F * 3.14159265358979323846F * frequency_hz * time));
+        input[index] = samples[index];
+    }
+    expect(engine.process(samples.data(), samples.size()), "detail level signal must process");
+    double input_energy = 0.0;
+    double output_energy = 0.0;
+    for (std::size_t index = rate / 2; index < sample_count; ++index) {
+        input_energy += static_cast<double>(input[index]) * input[index];
+        output_energy += static_cast<double>(samples[index]) * samples[index];
+    }
+    return 10.0F * std::log10(static_cast<float>(output_energy / input_energy));
+}
+
+void test_detail_transients_are_level_independent() {
+    for (const auto rate : {44100U, 48000U, 96000U, 192000U}) {
+        const float steady = measure_detail_gain_at(8000.0F, 0.4F, 0, true, rate);
+        for (const auto transients : {50U, 100U}) {
+            const float loud = measure_detail_gain_at(8000.0F, 0.4F, transients, true, rate);
+            expect(loud > steady + 0.02F, "transient test did not exercise transient enhancement");
+            for (const float amplitude : {0.004F, 0.0008F}) {
+                const float quiet = measure_detail_gain_at(8000.0F, amplitude, transients, true, rate);
+                expect_near(quiet, loud, 0.01F, "transient enhancement changed with playback level");
+            }
+        }
+    }
+}
+
+void test_detail_transients_preserve_state_across_blocks() {
+    audiofreedom::Engine whole;
+    audiofreedom::Engine chunked;
+    for (auto* engine : {&whole, &chunked}) {
+        expect(engine->prepare({48000, 1}), "detail block stream must prepare");
+        engine->set_preamp_millibels(0);
+        engine->set_limiter_enabled(false);
+        engine->set_detail_recovery_enabled(true);
+        engine->set_detail_amount_percent(100);
+        engine->set_detail_transients_percent(100);
+        engine->set_enabled(true);
+    }
+    std::vector<float> signal(48000);
+    for (std::size_t i = 0; i < signal.size(); ++i) {
+        const float burst = i % 4800 < 960 ? 1.0F : 0.03F;
+        signal[i] = 0.004F * (std::sin(2.0F * 3.14159265358979323846F * 220.0F * i / 48000.0F) +
+                0.25F * burst * std::sin(2.0F * 3.14159265358979323846F * 8000.0F * i / 48000.0F));
+    }
+    auto split = signal;
+    expect(whole.process(signal.data(), signal.size()), "whole detail block failed");
+    for (std::size_t offset = 0; offset < split.size();) {
+        const auto count = std::min<std::size_t>(137, split.size() - offset);
+        expect(chunked.process(split.data() + offset, count), "split detail block failed");
+        offset += count;
+    }
+    for (std::size_t i = 0; i < signal.size(); ++i) {
+        expect_near(signal[i], split[i], 1.0e-8F, "detail block boundary changed output");
+    }
+}
+
+// A per-session effect sits after the phone's volume, so the same song can arrive 40 dB
+// or more below full scale. Detail Recovery must sound the same either way.
+void test_detail_recovery_does_not_depend_on_playback_volume() {
+    const float full_scale = measure_detail_gain_at(8000.0F, 0.4F);
+    const float quiet = measure_detail_gain_at(8000.0F, 0.004F);   // -40 dB
+    const float very_quiet = measure_detail_gain_at(8000.0F, 0.0008F);  // -54 dB
+    std::cout << "Detail Recovery gain by level (dB): full=" << full_scale
+              << " -40dB=" << quiet << " -54dB=" << very_quiet << '\n';
+    // The high band carries ~6% of this signal's energy, so a ~3 dB lift on it moves
+    // the total by roughly 0.1 dB; what matters here is that it is the SAME at every level.
+    expect(full_scale > 0.08F, "detail recovery did nothing at full scale");
+    expect_near(quiet, full_scale, 0.05F, "detail recovery weakened at low playback volume");
+    expect_near(very_quiet, full_scale, 0.05F,
+                "detail recovery weakened at very low playback volume");
+
+    // Silence and near-silence stay untouched: no boosted noise floor.
+    audiofreedom::Engine engine;
+    expect(engine.prepare({48000, 1}), "detail silence stream must prepare");
+    engine.set_preamp_millibels(0);
+    engine.set_limiter_enabled(false);
+    engine.set_detail_recovery_enabled(true);
+    engine.set_detail_amount_percent(100);
+    engine.set_enabled(true);
+    std::vector<float> hiss(48000);
+    for (std::size_t index = 0; index < hiss.size(); ++index) {
+        hiss[index] = (index % 2 == 0 ? 1.0F : -1.0F) * 1.0e-7F;   // -140 dBFS
+    }
+    const auto original = hiss;
+    expect(engine.process(hiss.data(), hiss.size()), "detail silence must process");
+    for (std::size_t index = 0; index < hiss.size(); ++index) {
+        expect_near(hiss[index], original[index], 1.0e-9F,
+                    "detail recovery boosted digital near-silence");
+    }
+}
+
 void test_detail_recovery_bypass_stereo_and_clamping() {
     audiofreedom::Engine engine;
     engine.set_detail_amount_percent(500);
@@ -547,9 +662,64 @@ void test_detail_recovery_bypass_stereo_and_clamping() {
     expect_near(samples[3], -0.15F, 0.0F, "zero detail amount changed second right sample");
 }
 
+// A stereo stage on a multichannel bed (6 = 5.1, 12 = the 7.1.4 bed of a spatializer
+// output) must treat FL/FR exactly like a stereo stream and leave every other channel
+// untouched.
+template <typename Configure>
+void expect_front_pair_matches_stereo(Configure configure, const char* const stage) {
+    constexpr std::size_t frames = 4800;
+    for (const std::uint32_t channels : {6U, 12U}) {
+        audiofreedom::Engine stereo;
+        audiofreedom::Engine bed;
+        expect(stereo.prepare({48000, 2, true}), "stereo reference stream must prepare");
+        expect(bed.prepare({48000, channels, true}), "multichannel bed must prepare");
+        for (auto* engine : {&stereo, &bed}) {
+            engine->set_preamp_millibels(0);
+            engine->set_limiter_enabled(false);
+            configure(*engine);
+            engine->set_enabled(true);
+        }
+        std::vector<float> pair(frames * 2);
+        std::vector<float> multi(frames * channels);
+        for (std::size_t frame = 0; frame < frames; ++frame) {
+            const float time = static_cast<float>(frame) / 48000.0F;
+            const float left = 0.2F * std::sin(2.0F * 3.14159265358979323846F * 440.0F * time);
+            const float right = 0.15F * std::sin(2.0F * 3.14159265358979323846F * 3000.0F * time);
+            pair[frame * 2] = left;
+            pair[frame * 2 + 1] = right;
+            multi[frame * channels] = left;
+            multi[frame * channels + 1] = right;
+            for (std::uint32_t channel = 2; channel < channels; ++channel) {
+                multi[frame * channels + channel] = 0.01F * static_cast<float>(channel);
+            }
+        }
+        expect(stereo.process(pair.data(), frames), "stereo reference must process");
+        expect(bed.process(multi.data(), frames), "multichannel bed must process");
+        bool changed = false;
+        for (std::size_t frame = 0; frame < frames; ++frame) {
+            expect_near(multi[frame * channels], pair[frame * 2], 0.00001F,
+                        "front-left on a bed differs from the stereo stage");
+            expect_near(multi[frame * channels + 1], pair[frame * 2 + 1], 0.00001F,
+                        "front-right on a bed differs from the stereo stage");
+            for (std::uint32_t channel = 2; channel < channels; ++channel) {
+                expect_near(multi[frame * channels + channel],
+                            0.01F * static_cast<float>(channel), 0.0F,
+                            "a stereo stage changed a non-front channel");
+            }
+            const float time = static_cast<float>(frame) / 48000.0F;
+            const float left = 0.2F * std::sin(2.0F * 3.14159265358979323846F * 440.0F * time);
+            changed = changed || std::abs(multi[frame * channels] - left) > 0.0001F;
+        }
+        if (!changed) {
+            std::cerr << stage << ": ";
+            expect(false, "stereo stage did nothing on a multichannel bed");
+        }
+    }
+}
+
 float measure_immersive_side_gain(const float frequency_hz) {
     audiofreedom::Engine engine;
-    expect(engine.prepare({48000, 2}), "immersive stream must prepare");
+    expect(engine.prepare({48000, 2, true}), "immersive stream must prepare");
     engine.set_preamp_millibels(0);
     engine.set_limiter_enabled(false);
     engine.set_immersive_field_enabled(true);
@@ -592,7 +762,7 @@ void test_immersive_field_shapes_stage_without_latency() {
            "immersive width is not frequency dependent");
 
     audiofreedom::Engine engine;
-    expect(engine.prepare({48000, 2}), "immersive bypass stream must prepare");
+    expect(engine.prepare({48000, 2, true}), "immersive bypass stream must prepare");
     engine.set_preamp_millibels(0);
     engine.set_limiter_enabled(false);
     engine.set_immersive_field_enabled(true);
@@ -619,7 +789,7 @@ void test_immersive_field_reflections_stereo_and_clamping() {
     expect(engine.immersive_center_percent() == 100, "immersive center must clamp high");
     expect(engine.immersive_room_percent() == 100, "immersive room must clamp high");
 
-    expect(engine.prepare({48000, 2}), "immersive reflection stream must prepare");
+    expect(engine.prepare({48000, 2, true}), "immersive reflection stream must prepare");
     engine.set_preamp_millibels(0);
     engine.set_limiter_enabled(false);
     engine.set_immersive_field_enabled(true);
@@ -642,24 +812,17 @@ void test_immersive_field_reflections_stereo_and_clamping() {
     expect(tail_energy > 0.005,
            "immersive room reflection remains too weak to be perceptible");
 
-    audiofreedom::Engine multichannel;
-    expect(multichannel.prepare({48000, 6}), "immersive multichannel stream must prepare");
-    multichannel.set_preamp_millibels(0);
-    multichannel.set_limiter_enabled(false);
-    multichannel.set_immersive_field_enabled(true);
-    multichannel.set_immersive_amount_percent(100);
-    multichannel.set_enabled(true);
-    float channels[] = {0.1F, 0.2F, 0.3F, 0.4F, 0.5F, 0.6F};
-    expect(multichannel.process(channels, 1), "immersive multichannel bypass must process");
-    for (std::size_t index = 0; index < 6; ++index) {
-        expect_near(channels[index], 0.1F * static_cast<float>(index + 1), 0.000001F,
-                    "immersive field changed unsupported multichannel audio");
-    }
+    expect_front_pair_matches_stereo([](audiofreedom::Engine& engine) {
+        engine.set_immersive_field_enabled(true);
+        engine.set_immersive_amount_percent(100);
+        engine.set_immersive_width_percent(80);
+        engine.set_immersive_room_percent(40);
+    }, "immersive field");
 }
 
 void test_reverb_produces_a_decaying_stereo_tail() {
     audiofreedom::Engine engine;
-    expect(engine.prepare({48000, 2}), "reverb stream must prepare");
+    expect(engine.prepare({48000, 2, true}), "reverb stream must prepare");
     engine.set_preamp_millibels(0);
     engine.set_limiter_enabled(false);
     engine.set_reverb_enabled(true);
@@ -707,7 +870,7 @@ void test_reverb_bypass_clamping_and_multichannel_safety() {
     expect(engine.reverb_damping_percent() == 100, "reverb damping must clamp high");
     expect(engine.reverb_decay_milliseconds() == 5000, "reverb decay must clamp high");
 
-    expect(engine.prepare({48000, 2}), "reverb bypass stream must prepare");
+    expect(engine.prepare({48000, 2, true}), "reverb bypass stream must prepare");
     engine.set_preamp_millibels(0);
     engine.set_limiter_enabled(false);
     engine.set_reverb_enabled(true);
@@ -718,19 +881,58 @@ void test_reverb_bypass_clamping_and_multichannel_safety() {
     expect_near(stereo[0], 0.4F, 0.0F, "zero reverb amount changed left sample");
     expect_near(stereo[1], -0.2F, 0.0F, "zero reverb amount changed right sample");
 
-    audiofreedom::Engine multichannel;
-    expect(multichannel.prepare({48000, 6}), "reverb multichannel stream must prepare");
-    multichannel.set_preamp_millibels(0);
-    multichannel.set_limiter_enabled(false);
-    multichannel.set_reverb_enabled(true);
-    multichannel.set_reverb_amount_percent(100);
-    multichannel.set_enabled(true);
-    float channels[] = {0.1F, 0.2F, 0.3F, 0.4F, 0.5F, 0.6F};
-    expect(multichannel.process(channels, 1), "reverb multichannel bypass must process");
-    for (std::size_t index = 0; index < 6; ++index) {
-        expect_near(channels[index], 0.1F * static_cast<float>(index + 1), 0.000001F,
-                    "reverb changed unsupported multichannel audio");
+    expect_front_pair_matches_stereo([](audiofreedom::Engine& engine) {
+        engine.set_reverb_enabled(true);
+        engine.set_reverb_amount_percent(100);
+    }, "reverb");
+}
+
+void test_front_pair_layout_validation_and_unknown_layout_bypass() {
+    using audiofreedom::android::has_matching_front_pair;
+    expect(has_matching_front_pair(0x3, 0x3, true), "stereo positional pair must be verified");
+    expect(has_matching_front_pair(0x3f, 0x3f, true), "5.1 front pair must be verified");
+    expect(has_matching_front_pair(0x2d63f, 0x2d63f, true), "height-bed front pair must be verified");
+    expect(!has_matching_front_pair(0x3, 0x3, false), "indexed layout must not imply speaker identities");
+    expect(!has_matching_front_pair(0xc, 0xc, true), "center/LFE pair must not be treated as FL/FR");
+    expect(!has_matching_front_pair(0x5, 0x5, true), "missing right channel must be rejected");
+    expect(!has_matching_front_pair(0x3f, 0x60f, true), "different positional layouts must not share a verified pair");
+
+    for (const auto channels : {2U, 6U, 12U, 32U}) {
+        audiofreedom::Engine engine;
+        expect(engine.prepare({48000, channels}), "unknown layout must still prepare");
+        engine.set_preamp_millibels(-600);
+        engine.set_limiter_enabled(false);
+        engine.set_immersive_field_enabled(true);
+        engine.set_immersive_amount_percent(100);
+        engine.set_reverb_enabled(true);
+        engine.set_reverb_amount_percent(100);
+        engine.set_enabled(true);
+        std::vector<float> signal(4800 * channels, 0.1F);
+        expect(engine.process(signal.data(), 4800), "unknown layout must still process");
+        const float expected = 0.1F * std::pow(10.0F, -600.0F / 2000.0F);
+        for (const auto sample : signal) {
+            expect_near(sample, expected, 1.0e-7F,
+                "unknown layout must bypass spatial stages without bypassing preamp");
+        }
     }
+}
+
+void test_mono_reverb_does_not_require_a_stereo_pair() {
+    audiofreedom::Engine engine;
+    expect(engine.prepare({48000, 1}), "mono reverb must prepare without a stereo pair");
+    engine.set_preamp_millibels(0);
+    engine.set_limiter_enabled(false);
+    engine.set_reverb_enabled(true);
+    engine.set_reverb_amount_percent(100);
+    engine.set_enabled(true);
+    std::vector<float> samples(48000, 0.0F);
+    samples[0] = 0.8F;
+    expect(engine.process(samples.data(), samples.size()), "mono reverb must process");
+    double tail_energy = 0.0;
+    for (std::size_t i = 2000; i < samples.size(); ++i) {
+        tail_energy += static_cast<double>(samples[i]) * samples[i];
+    }
+    expect(tail_energy > 0.0001, "layout validation disabled mono reverb");
 }
 
 void test_protocol_identity() {
@@ -1000,10 +1202,15 @@ int main() {
     test_bass_foundation_profiles_remain_finite_and_limited();
     test_detail_recovery_targets_high_frequencies_and_transients();
     test_detail_recovery_bypass_stereo_and_clamping();
+    test_detail_recovery_does_not_depend_on_playback_volume();
+    test_detail_transients_are_level_independent();
+    test_detail_transients_preserve_state_across_blocks();
     test_immersive_field_shapes_stage_without_latency();
     test_immersive_field_reflections_stereo_and_clamping();
     test_reverb_produces_a_decaying_stereo_tail();
     test_reverb_bypass_clamping_and_multichannel_safety();
+    test_front_pair_layout_validation_and_unknown_layout_bypass();
+    test_mono_reverb_does_not_require_a_stereo_pair();
     test_protocol_identity();
     test_wire_parameter_round_trip();
     test_wire_equalizer_round_trip();

@@ -3,6 +3,7 @@ package com.svetlio.audiofreedom
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.UnknownHostException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -12,10 +13,12 @@ internal sealed interface UpdateCheckResult {
         val version: String,
         val releaseUrl: String,
         val asset: AppUpdateAsset? = null,
+        val highlights: List<String> = emptyList(),
     ) : UpdateCheckResult
 
     data class UpToDate(val latestVersion: String) : UpdateCheckResult
 
+    data object NetworkUnavailable : UpdateCheckResult
     data object Failed : UpdateCheckResult
 }
 
@@ -40,6 +43,10 @@ internal object AppUpdateChecker {
 
             val response = connection.inputStream.bufferedReader().use { it.readText() }
             parseAppUpdateRelease(JSONObject(response), currentVersion)
+        } catch (_: UnknownHostException) {
+            UpdateCheckResult.NetworkUnavailable
+        } catch (_: SecurityException) {
+            UpdateCheckResult.NetworkUnavailable
         } catch (_: IOException) {
             UpdateCheckResult.Failed
         } catch (_: RuntimeException) {
@@ -90,7 +97,17 @@ internal fun parseAppUpdateRelease(release: JSONObject, currentVersion: String):
         if (!isTrustedAppUpdateUrl(url, version, true) || hash == null || size !in 1..MaximumAppUpdateBytes) null
         else AppUpdateAsset(version, url, hash, size)
     }
-    return UpdateCheckResult.UpdateAvailable(version, releaseUrl, asset)
+    return UpdateCheckResult.UpdateAvailable(version, releaseUrl, asset,
+        parseReleaseHighlights(release.optString("body")))
+}
+
+internal fun parseReleaseHighlights(body: String): List<String> {
+    val section = body.take(32_768).lineSequence().dropWhile {
+        !it.trim().equals("## Highlights", ignoreCase = true)
+    }.drop(1).takeWhile { !it.trimStart().startsWith("#") }
+    return section.map(String::trim).filter { it.startsWith("- ") || it.startsWith("* ") }
+        .map { it.drop(2).replace(Regex("[\\p{Cntrl}]"), "").trim().take(180) }
+        .filter(String::isNotBlank).take(3).toList()
 }
 
 internal fun isVersionNewer(candidate: String, current: String): Boolean {

@@ -28,10 +28,10 @@ software effect chain.
 
 ## Features
 
-The latest milestone is **0.9.8-beta**. See the
-[release notes](docs/releases/0.9.8-beta.md) for changes since 0.9.7.
+The latest release is **1.0.0**. See the [release notes](docs/releases/1.0.0.md)
+for what's new.
 
-- System-wide session-0 processing controlled by a foreground service
+- System-wide processing with automatic recovery when Android suspends the global effect
 - Ten-band constant-Q equalizer with preamp, persistent presets, and an optional +/-20 dB range unlock
 - Bass Foundation with deep-band lift, adaptive restraint, and small-driver support
 - Transient-aware Detail Recovery with linked stereo decisions

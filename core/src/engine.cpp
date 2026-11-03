@@ -57,6 +57,7 @@ void Engine::reset() noexcept {
     detail_lowpass_state_.fill(0.0F);
     detail_fast_envelope_ = 0.0F;
     detail_slow_envelope_ = 0.0F;
+    detail_reference_envelope_ = 0.0F;
     immersive_side_lowpass_ = 0.0F;
     immersive_crossfeed_left_ = 0.0F;
     immersive_crossfeed_right_ = 0.0F;
@@ -406,10 +407,11 @@ bool Engine::process(float* const samples, const std::size_t frame_count) noexce
         const bool use_limiter = limiter_enabled() || leveler_config.enabled;
         const bool use_dynamic_bass = dynamic_bass_enabled();
         const bool use_detail_recovery = detail_recovery_enabled();
+        // Adapters verify speaker identities before these stages touch channels 0/1.
+        const bool has_front_pair = config_.front_pair_verified && config_.channel_count >= 2;
         const bool use_immersive_field =
-                immersive_field_enabled() && config_.channel_count == 2;
-        const bool use_reverb = reverb_enabled() &&
-                (config_.channel_count == 1 || config_.channel_count == 2);
+                immersive_field_enabled() && has_front_pair;
+        const bool use_reverb = reverb_enabled() && (config_.channel_count == 1 || has_front_pair);
         const float sample_rate = static_cast<float>(config_.sample_rate_hz);
         const float bass_strength =
                 static_cast<float>(bass_boost_millibels()) /
@@ -448,6 +450,10 @@ bool Engine::process(float* const samples, const std::size_t frame_count) noexce
                 -1.0F / (0.060F * static_cast<float>(config_.sample_rate_hz)));
         const float detail_slow_release = 1.0F - std::exp(
                 -1.0F / (0.250F * static_cast<float>(config_.sample_rate_hz)));
+        const float detail_reference_attack = 1.0F - std::exp(
+                -1.0F / (0.010F * static_cast<float>(config_.sample_rate_hz)));
+        const float detail_reference_release = 1.0F - std::exp(
+                -1.0F / (3.000F * static_cast<float>(config_.sample_rate_hz)));
         const float maximum_detail_boost_db =
                 10.0F * static_cast<float>(detail_amount_percent()) / 100.0F;
         const float detail_transients =
@@ -526,6 +532,7 @@ bool Engine::process(float* const samples, const std::size_t frame_count) noexce
             detail_lowpass_state_.fill(0.0F);
             detail_fast_envelope_ = 0.0F;
             detail_slow_envelope_ = 0.0F;
+            detail_reference_envelope_ = 0.0F;
         }
         if (!use_immersive_field && immersive_state_active_) {
             immersive_side_lowpass_ = 0.0F;
@@ -637,6 +644,7 @@ bool Engine::process(float* const samples, const std::size_t frame_count) noexce
 
             if (use_detail_recovery) {
                 float frame_detail_peak = 0.0F;
+                float frame_program_peak = 0.0F;
                 for (std::size_t channel = 0; channel < config_.channel_count; ++channel) {
                     const std::size_t index = frame * config_.channel_count + channel;
                     auto& lowpass = detail_lowpass_state_[channel];
@@ -644,7 +652,14 @@ bool Engine::process(float* const samples, const std::size_t frame_count) noexce
                     detail_highpass[channel] = samples[index] - lowpass;
                     frame_detail_peak =
                             std::max(frame_detail_peak, std::abs(detail_highpass[channel]));
+                    frame_program_peak = std::max(frame_program_peak, std::abs(samples[index]));
                 }
+                const float reference_coefficient =
+                        frame_program_peak > detail_reference_envelope_
+                                ? detail_reference_attack
+                                : detail_reference_release;
+                detail_reference_envelope_ += reference_coefficient *
+                        (frame_program_peak - detail_reference_envelope_);
                 const float fast_coefficient = frame_detail_peak > detail_fast_envelope_
                                                        ? detail_fast_attack
                                                        : detail_fast_release;
@@ -655,12 +670,27 @@ bool Engine::process(float* const samples, const std::size_t frame_count) noexce
                         fast_coefficient * (frame_detail_peak - detail_fast_envelope_);
                 detail_slow_envelope_ +=
                         slow_coefficient * (frame_detail_peak - detail_slow_envelope_);
+                // Keep transient sensitivity proportional to the programme, not full scale.
+                const float transient_floor = 0.025F * detail_reference_envelope_ + 1.0e-12F;
                 const float transient = std::clamp(
                         (detail_fast_envelope_ - detail_slow_envelope_) /
-                                (detail_slow_envelope_ + 0.01F),
+                                (detail_slow_envelope_ + transient_floor),
                         0.0F, 1.0F);
-                const float noise_guard = std::clamp(
-                        (detail_slow_envelope_ - 0.001F) / 0.009F, 0.0F, 1.0F);
+                // Noise guard, relative to the programme's own level rather than to full
+                // scale. A per-session effect runs AFTER the phone's volume, so at normal
+                // listening levels the signal sits 30-50 dB below full scale; a fixed
+                // -60 dBFS gate then shut Detail Recovery off almost entirely. Judging
+                // the high band against the music's recent level behaves the same at any
+                // volume: it stays out of the way when the top end is >50 dB below the
+                // programme (hiss under a quiet passage) and is fully on from -30 dB.
+                // The tiny absolute floor only catches true digital silence.
+                const float relative_detail = detail_slow_envelope_ /
+                        (detail_reference_envelope_ + 1.0e-9F);
+                const float relative_guard = std::clamp(
+                        (relative_detail - 0.003F) / 0.0286F, 0.0F, 1.0F);
+                const float silence_guard = std::clamp(
+                        (detail_slow_envelope_ - 1.0e-6F) / 9.0e-6F, 0.0F, 1.0F);
+                const float noise_guard = relative_guard * silence_guard;
                 const float effective_boost_db = maximum_detail_boost_db * noise_guard *
                         (0.32F + 0.68F * detail_transients * transient);
                 const float detail_gain = std::pow(10.0F, effective_boost_db / 20.0F);
@@ -671,7 +701,7 @@ bool Engine::process(float* const samples, const std::size_t frame_count) noexce
             }
 
             if (use_immersive_field) {
-                const std::size_t left_index = frame * 2;
+                const std::size_t left_index = frame * config_.channel_count;
                 const std::size_t right_index = left_index + 1;
                 const float dry_left = samples[left_index];
                 const float dry_right = samples[right_index];
@@ -735,7 +765,7 @@ bool Engine::process(float* const samples, const std::size_t frame_count) noexce
 
             if (use_reverb) {
                 const std::size_t left_index = frame * config_.channel_count;
-                const std::size_t right_index = config_.channel_count == 2
+                const std::size_t right_index = config_.channel_count >= 2
                         ? left_index + 1
                         : left_index;
                 const float dry_left = samples[left_index];
@@ -785,7 +815,7 @@ bool Engine::process(float* const samples, const std::size_t frame_count) noexce
                         (delayed[0] - delayed[1] + delayed[2] + delayed[3]);
                 samples[left_index] = dry_left * reverb_dry_gain +
                         wet_left * reverb_wet_gain;
-                if (config_.channel_count == 2) {
+                if (config_.channel_count >= 2) {
                     samples[right_index] = dry_right * reverb_dry_gain +
                             wet_right * reverb_wet_gain;
                 }
