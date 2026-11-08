@@ -70,8 +70,39 @@ internal object AudioFreedomProfileStore {
         editor.remove(key(profileId, "device_group"))
         profileFields.forEach { field -> editor.remove(key(profileId, field)) }
         repeat(EqualizerBandCount) { band -> editor.remove(key(profileId, "band_$band")) }
+        repeat(EqualizerBandCount) { band -> editor.remove(key(profileId, "q_$band")) }
+        listOf("routing_enabled", "routing_mode", "routing_right", "routing_balance").forEach {
+            editor.remove(key(profileId, it))
+        }
         editor.apply()
         AppPreferencesStore.removeProfileAssignments(context, profileId)
+    }
+
+    fun manage(context: Context, action: ProfileAction) {
+        val preferences = context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
+        val ids = preferences.getStringSet(KeyProfileIds, emptySet()).orEmpty().toSet()
+        // Read raw profile settings, not the range-limited live view, when duplicating.
+        val profiles = ids.mapNotNull { readProfile(preferences, it) }
+        when (action) {
+            is ProfileAction.Delete -> action.ids.intersect(ids).forEach { delete(context, it) }
+            is ProfileAction.Duplicate -> {
+                val source = profiles.firstOrNull { it.id == action.id } ?: return
+                val newId = UUID.randomUUID().toString()
+                preferences.edit().putStringSet(KeyProfileIds, ids + newId)
+                    .putString(key(newId, "name"), duplicateProfileName(source, profiles))
+                    .putString(key(newId, "device_group"), source.deviceGroup)
+                    .putSettings(newId, source.settings).apply()
+            }
+            else -> {
+                val planned = planProfileMetadata(profiles, action)
+                val editor = preferences.edit()
+                planned.filterIndexed { index, profile -> profile != profiles[index] }.forEach { profile ->
+                    editor.putString(key(profile.id, "name"), profile.name)
+                        .putString(key(profile.id, "device_group"), profile.deviceGroup)
+                }
+                editor.apply()
+            }
+        }
     }
 
     private fun readProfile(
@@ -97,6 +128,13 @@ internal object AudioFreedomProfileStore {
                     preferences.getInt(key(id, "band_$band"), 0)
                         .coerceIn(-ExtendedEqualizerGainLimit, ExtendedEqualizerGainLimit)
                 },
+                bandQHundredths = List(EqualizerBandCount) { band ->
+                    preferences.getInt(key(id, "q_$band"), DefaultEqualizerQ).coerceIn(30, 500)
+                },
+                stereoRoutingEnabled = preferences.getBoolean(key(id, "routing_enabled"), false),
+                stereoRoutingMode = StereoRoutingMode.entries.getOrElse(preferences.getInt(key(id, "routing_mode"), 0)) { StereoRoutingMode.Normal },
+                stereoOutputRight = preferences.getBoolean(key(id, "routing_right"), false),
+                stereoBalancePercent = preferences.getInt(key(id, "routing_balance"), 0).coerceIn(-100, 100),
                 dynamicBassEnabled = preferences.getBoolean(
                     key(id, "bass_enabled"), defaults.dynamicBassEnabled,
                 ),
@@ -175,6 +213,11 @@ internal object AudioFreedomProfileStore {
     ): SharedPreferences.Editor {
         putBoolean(key(id, "equalizer_enabled"), settings.equalizerEnabled)
         putInt(key(id, "preamp"), settings.preampMillibels)
+        settings.bandQHundredths.forEachIndexed { band, q -> putInt(key(id, "q_$band"), q) }
+        putBoolean(key(id, "routing_enabled"), settings.stereoRoutingEnabled)
+        putInt(key(id, "routing_mode"), settings.stereoRoutingMode.ordinal)
+        putBoolean(key(id, "routing_right"), settings.stereoOutputRight)
+        putInt(key(id, "routing_balance"), settings.stereoBalancePercent)
         settings.bandGainsMillibels.forEachIndexed { band, gain ->
             putInt(key(id, "band_$band"), gain)
         }

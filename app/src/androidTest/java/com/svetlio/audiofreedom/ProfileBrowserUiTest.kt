@@ -24,7 +24,7 @@ class ProfileBrowserUiTest {
         for (value in AppTheme.entries) {
             compose.runOnIdle { theme.value = value }
             compose.onNodeWithContentDescription("Choose profile").assertIsDisplayed().performClick()
-            compose.onNodeWithText("Search profiles or devices").performTextInput("79")
+            compose.onNodeWithText("Search profiles or groups").performTextInput("79")
             compose.onNodeWithText("Sound 79").assertIsDisplayed()
             if (value == AppTheme.Mocha) {
                 val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -44,7 +44,7 @@ class ProfileBrowserUiTest {
                 "Sony Amp", assigned.value, { assigned.value = it })
         } }
         compose.onNodeWithContentDescription("Choose profile").performClick()
-        compose.onNodeWithText("Search profiles or devices").performTextInput("79")
+        compose.onNodeWithText("Search profiles or groups").performTextInput("79")
         compose.onNodeWithText("Sound 79").assertIsDisplayed()
         compose.onNodeWithText("Sound 78").assertDoesNotExist()
         compose.onNodeWithContentDescription("Set as device default").performClick()
@@ -61,7 +61,7 @@ class ProfileBrowserUiTest {
         } }
         fun choose() {
             compose.onNodeWithContentDescription("Choose profile").performClick()
-            compose.onNodeWithText("Search profiles or devices").performTextInput("79")
+            compose.onNodeWithText("Search profiles or groups").performTextInput("79")
             compose.onNodeWithText("Sound 79").performClick()
         }
         choose()

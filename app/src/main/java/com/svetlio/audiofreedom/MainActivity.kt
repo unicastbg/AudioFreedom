@@ -11,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -93,6 +94,7 @@ class MainActivity : ComponentActivity() {
         val initialDriverState = probeDriver()
         val initialEnabled = AudioFreedomService.isRequestedEnabled(this)
         val initialSettings = AudioFreedomSettingsStore.load(this)
+        AudioFreedomService.recoverSpatialAudio(this)
         var appPreferences by mutableStateOf(AppPreferencesStore.load(this))
         AssistantRuntimeManager.initialize(this)
         AssistantRuntimeManager.updatePolicy(
@@ -100,7 +102,7 @@ class MainActivity : ComponentActivity() {
             appPreferences.assistantKeepWarm,
         )
         if (initialEnabled) {
-            AudioFreedomService.setEnabled(this, true)
+            AudioFreedomService.resumeRequestedProcessing(this)
         }
         Log.i("AudioFreedom", "Driver state: ${initialDriverState.name}")
         setContent {
@@ -151,6 +153,7 @@ private enum class ControllerPage {
     AssistantSettings,
     MainPageSettings,
     Themes,
+    Profiles,
 }
 
 @Composable
@@ -168,6 +171,7 @@ private fun ControllerScreen(
     var driverState by remember { mutableStateOf(initialDriverState) }
     var enabled by remember { mutableStateOf(initialEnabled) }
     var settings by remember { mutableStateOf(initialSettings) }
+    var confirmedSettings by remember { mutableStateOf(initialSettings) }
     var selectedPreset by remember { mutableStateOf(EqualizerPreset.matching(initialSettings)) }
     var presetMenuExpanded by remember { mutableStateOf(false) }
     var selectedBassPreset by remember {
@@ -188,6 +192,14 @@ private fun ControllerScreen(
     var reverbPresetMenuExpanded by remember { mutableStateOf(false) }
     var outputExpanded by rememberSaveable { mutableStateOf(false) }
     var equalizerExpanded by rememberSaveable { mutableStateOf(false) }
+    var selectedQBand by rememberSaveable { mutableStateOf(2) }
+    var routingExpanded by rememberSaveable { mutableStateOf(false) }
+    var routingDriverUpdateRequired by remember { mutableStateOf(false) }
+    var spatialState by remember { mutableStateOf(AudioFreedomService.currentSpatialAudio) }
+    var spatialEnabled by remember { mutableStateOf<Boolean?>(null) }
+    var spatialConsentOpen by rememberSaveable { mutableStateOf(false) }
+    var spatialDismissedKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var spatialRestoreWarningDismissed by remember { mutableStateOf(false) }
     var dynamicBassExpanded by rememberSaveable { mutableStateOf(false) }
     var detailRecoveryExpanded by rememberSaveable { mutableStateOf(false) }
     var immersiveFieldExpanded by rememberSaveable { mutableStateOf(false) }
@@ -416,6 +428,7 @@ private fun ControllerScreen(
         selectedImmersivePreset = ImmersiveFieldPreset.matching(updated)
         selectedReverbPreset = ReverbPreset.matching(updated)
         driverState = onSettingsChanged(updated)
+        confirmedSettings = updated
     }
 
     LaunchedEffect(enabled) {
@@ -456,8 +469,11 @@ private fun ControllerScreen(
     LaunchedEffect(Unit) {
         while (true) {
             val storedPreferences = AppPreferencesStore.load(context)
+            spatialState = AudioFreedomService.currentSpatialAudio
+            spatialEnabled = systemSpatialAudioEnabled(context)
             if (storedPreferences != appPreferences) appPreferences = storedPreferences
             val storedSettings = AudioFreedomSettingsStore.load(context)
+            confirmedSettings = storedSettings
             if (storedSettings != settings) {
                 settings = storedSettings
                 selectedPreset = EqualizerPreset.matching(settings)
@@ -706,17 +722,53 @@ private fun ControllerScreen(
         }
     }
 
+    val showingHighlights = if (currentPage == ControllerPage.Main) ReleaseHighlightsNotice() else false
+    val spatialRequestKey = "${audioRoute.id}:${confirmedSettings.stereoRoutingMode}:${confirmedSettings.stereoBalancePercent}"
+    LaunchedEffect(spatialState) { if (spatialState != SpatialLeaseState.RestoreFailed) spatialRestoreWarningDismissed = false }
+    if (spatialState == SpatialLeaseState.RestoreFailed && !spatialRestoreWarningDismissed && !showingHighlights) {
+        AlertDialog(onDismissRequest = { spatialRestoreWarningDismissed = true },
+            title = { Text("Spatial audio needs restoring") },
+            text = { Text("AudioFreedom could not restore the previous system spatial-audio setting. Check root access and retry, or restore it in your phone's sound settings.") },
+            confirmButton = { TextButton(onClick = {
+                spatialRestoreWarningDismissed = true
+                AudioFreedomService.restoreSpatialAudio(context)
+            }) { Text("Restore") } },
+            dismissButton = { TextButton(onClick = { spatialRestoreWarningDismissed = true }) { Text("Close") } })
+    }
+    LaunchedEffect(confirmedSettings.needsStereoPath, enabled, spatialEnabled,
+        streamFrame?.value?.channels, spatialState, spatialRequestKey) {
+        if (!confirmedSettings.needsStereoPath) spatialDismissedKey = null
+        if (!confirmedSettings.needsStereoPath || !enabled) spatialConsentOpen = false
+        if (shouldRequestSpatialConsent(confirmedSettings, enabled,
+                streamFrame?.takeIf { it.isFresh(android.os.SystemClock.elapsedRealtime()) }?.value?.channels,
+                spatialEnabled, spatialState) && spatialDismissedKey != spatialRequestKey) spatialConsentOpen = true
+    }
+    if (spatialConsentOpen && !showingHighlights && currentPage == ControllerPage.Main) SpatialAudioConsentDialog(
+        onConfirm = {
+            spatialConsentOpen = false
+            spatialDismissedKey = spatialRequestKey
+            AudioFreedomService.allowSpatialStereo(context, audioRoute.id)
+        },
+        onCancel = {
+            spatialConsentOpen = false
+            spatialDismissedKey = spatialRequestKey
+        },
+    )
+
     profileSaveRequest?.let { request ->
         ProfileSaveDialog(
             title = if (request.profileId == null) "Save new profile" else "Update profile",
             profiles = profiles,
             profileId = request.profileId,
+            currentProfileId = selectedProfileId,
             name = profileName,
             deviceGroup = profileDeviceGroup,
             onProfileChanged = { profileId ->
                 profileSaveRequest = ProfileSaveRequest(profileId)
-                profileName = profiles.firstOrNull { it.id == profileId }?.name.orEmpty()
-                profileDeviceGroup = profiles.firstOrNull { it.id == profileId }?.deviceGroup.orEmpty()
+                profiles.firstOrNull { it.id == profileId }?.let {
+                    profileName = it.name
+                    profileDeviceGroup = it.deviceGroup
+                }
             },
             onNameChange = { profileName = it },
             onDeviceGroupChange = { profileDeviceGroup = it },
@@ -737,11 +789,14 @@ private fun ControllerScreen(
     }
 
     if (currentPage == ControllerPage.Main) {
-        val showingHighlights = ReleaseHighlightsNotice()
         if (!showingHighlights) DriverModuleUpdateNotice(onOpenUpdates = {
             openDriverUpdates = true
             currentPage = ControllerPage.Settings
-        }, onModuleChecked = { extendedEqDriverUpdateRequired = needsExtendedEqualizerDriverUpdate(it) })
+        }, onModuleChecked = {
+            extendedEqDriverUpdateRequired = needsExtendedEqualizerDriverUpdate(it)
+            routingDriverUpdateRequired = it !is DriverModuleProbeResult.Installed ||
+                it.info.versionCode < 45 || it.info.staged
+        })
     }
     Scaffold(
         topBar = {
@@ -755,6 +810,7 @@ private fun ControllerScreen(
                         ControllerPage.MainPageSettings ->
                             Text("Main page functions", fontWeight = FontWeight.SemiBold)
                         ControllerPage.Themes -> Text("Themes", fontWeight = FontWeight.SemiBold)
+                        ControllerPage.Profiles -> Text("Manage profiles", fontWeight = FontWeight.SemiBold)
                         ControllerPage.Main -> {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("AudioFreedom", fontWeight = FontWeight.SemiBold)
@@ -804,6 +860,24 @@ private fun ControllerScreen(
         containerColor = MaterialTheme.colorScheme.background,
     ) { contentPadding ->
         when (currentPage) {
+            ControllerPage.Profiles -> ProfileManagerScreen(
+                profiles = profiles, activeId = selectedProfileId,
+                onAction = { action ->
+                    val error = try {
+                        AudioFreedomProfileStore.manage(context, action)
+                        null
+                    } catch (error: IllegalArgumentException) {
+                        error.message ?: "Could not update profiles."
+                    }
+                    if (error == null) {
+                        profiles = AudioFreedomProfileStore.list(context)
+                        if (profiles.none { it.id == selectedProfileId }) selectedProfileId = null
+                        assignedProfileId = AppPreferencesStore.profileForRoute(context, audioRoute.id)
+                    }
+                    error
+                },
+                modifier = Modifier.padding(contentPadding),
+            )
             ControllerPage.Settings -> SettingsScreen(
                 route = audioRoute,
                 profiles = profiles,
@@ -955,7 +1029,7 @@ private fun ControllerScreen(
             }
             val addProfile: () -> Unit = {
                 profileName = ""
-                profileDeviceGroup = ""
+                profileDeviceGroup = profiles.firstOrNull { it.id == selectedProfileId }?.deviceGroup.orEmpty()
                 profileSaveRequest = ProfileSaveRequest(profileId = null)
             }
             val saveProfile: () -> Unit = {
@@ -963,17 +1037,6 @@ private fun ControllerScreen(
                 profileName = selected?.name.orEmpty()
                 profileDeviceGroup = selected?.deviceGroup.orEmpty()
                 profileSaveRequest = ProfileSaveRequest(profileId = selected?.id)
-            }
-            val deleteProfile: () -> Unit = {
-                selectedProfileId?.let { profileId ->
-                    AudioFreedomProfileStore.delete(context, profileId)
-                    if (assignedProfileId == profileId) {
-                        AppPreferencesStore.assignProfile(context, audioRoute.id, null)
-                        assignedProfileId = null
-                    }
-                }
-                selectedProfileId = null
-                profiles = AudioFreedomProfileStore.list(context)
             }
             if (layoutStyle.modern) {
                 val effectStates = listOf(
@@ -984,6 +1047,7 @@ private fun ControllerScreen(
                     MainPageFunction.DetailRecovery to settings.detailRecoveryEnabled,
                     MainPageFunction.BassFoundation to settings.dynamicBassEnabled,
                     MainPageFunction.OutputProtection to settings.limiterEnabled,
+                    MainPageFunction.StereoRouting to settings.stereoRoutingEnabled,
                 ).filter { appPreferences.isVisible(it.first) }
                 ProcessingHeroCard(
                     driverState = driverState,
@@ -1015,7 +1079,7 @@ private fun ControllerScreen(
                     onProfileSelected = selectProfile,
                     onAdd = addProfile,
                     onSave = saveProfile,
-                    onDelete = deleteProfile,
+                    onManage = { currentPage = ControllerPage.Profiles },
                     routeLabel = audioRoute.label,
                     assignedProfileId = assignedProfileId,
                     onAssignDefault = { id ->
@@ -1066,7 +1130,7 @@ private fun ControllerScreen(
                 onProfileSelected = selectProfile,
                 onAdd = addProfile,
                 onSave = saveProfile,
-                onDelete = deleteProfile,
+                onManage = { currentPage = ControllerPage.Profiles },
                 routeLabel = audioRoute.label,
                 assignedProfileId = assignedProfileId,
                 onAssignDefault = { id ->
@@ -1185,7 +1249,7 @@ private fun ControllerScreen(
                     commitSettings(settings.copy(equalizerEnabled = requested))
                 },
                 preview = {
-                    EqualizerMiniCurve(settings.bandGainsMillibels, settings.equalizerEnabled, settings.equalizerGainLimit)
+                    EqualizerMiniCurve(settings.bandGainsMillibels, settings.equalizerEnabled, settings.equalizerGainLimit, settings.bandQHundredths)
                 },
             ) {
                 EqualizerRangeControl(
@@ -1204,6 +1268,13 @@ private fun ControllerScreen(
                 if (LocalLayoutStyle.current.modern) {
                     ModernEqualizerEditor(
                         bandGains = settings.bandGainsMillibels,
+                        qValues = settings.bandQHundredths,
+                        bandwidthEnabled = !routingDriverUpdateRequired,
+                        onQChange = { band, q ->
+                            settings = settings.copy(bandQHundredths = settings.bandQHundredths.toMutableList().also { it[band] = q })
+                            selectedPreset = EqualizerPreset.matching(settings)
+                        },
+                        onResetQ = { commitSettings(settings.copy(bandQHundredths = List(10) { DefaultEqualizerQ })) },
                         preampMillibels = settings.preampMillibels,
                         enabled = settings.equalizerEnabled,
                         gainLimit = settings.equalizerGainLimit,
@@ -1273,10 +1344,12 @@ private fun ControllerScreen(
                 EqualizerBandLabels.forEachIndexed { band, label ->
                     EqualizerBandRow(
                         label = label,
+                        onSelected = { selectedQBand = band },
                         gainMillibels = settings.bandGainsMillibels[band],
                         gainLimit = settings.equalizerGainLimit,
                         enabled = settings.equalizerEnabled,
                         onGainChanged = { gain ->
+                            selectedQBand = band
                             val gains = settings.bandGainsMillibels.toMutableList()
                             gains[band] = gain
                             settings = settings.copy(bandGainsMillibels = gains)
@@ -1285,12 +1358,47 @@ private fun ControllerScreen(
                         onGainCommitted = { commitSettings(settings) },
                     )
                 }
+                EqualizerBandwidthControls(settings.bandQHundredths, selectedQBand, { selectedQBand = it },
+                    settings.equalizerEnabled && !routingDriverUpdateRequired,
+                    { band, q ->
+                        settings = settings.copy(bandQHundredths = settings.bandQHundredths.toMutableList().also { it[band] = q })
+                        selectedPreset = EqualizerPreset.matching(settings)
+                    }, { commitSettings(settings) },
+                    { commitSettings(settings.copy(bandQHundredths = List(10) { DefaultEqualizerQ })) })
                 Spacer(Modifier.height(14.dp))
                 }
+                if (routingDriverUpdateRequired) Text("Update the bundled driver module and reboot to adjust bandwidth.",
+                    style = MaterialTheme.typography.bodySmall)
             }
             SectionGap()
             }
             EffectGroup {
+            if (appPreferences.isVisible(MainPageFunction.StereoRouting)) {
+                CollapsibleEffectSection(
+                    title = "Stereo routing",
+                    summary = stereoRoutingSummary(settings,
+                        streamFrame?.takeIf { it.isFresh(analysisNow) }?.value),
+                    expanded = routingExpanded, onExpandedChange = { routingExpanded = it },
+                    enabled = settings.stereoRoutingEnabled,
+                    onEnabledChange = { requested ->
+                        if (!requested || !routingDriverUpdateRequired)
+                            commitSettings(settings.copy(stereoRoutingEnabled = requested))
+                    },
+                ) {
+                    if (routingDriverUpdateRequired) Text("Update the bundled driver module and reboot to enable stereo routing.",
+                        style = MaterialTheme.typography.bodySmall)
+                    streamFrame?.takeIf { it.isFresh(analysisNow) }?.value?.takeIf { it.channels != 2 }?.let {
+                        Text("Routing bypassed: the active DSP stream has ${it.channels} channels, not stereo. Other effects remain active.",
+                            style = MaterialTheme.typography.bodySmall)
+                    }
+                    StereoRoutingControls(settings, { settings = it }, { commitSettings(settings) })
+                    SpatialAudioRoutingStatus(spatialState, spatialEnabled,
+                        settings.needsStereoPath && enabled &&
+                            (streamFrame?.value?.channels ?: 0) > 2,
+                        onRequest = { spatialConsentOpen = true },
+                        onRestore = { AudioFreedomService.restoreSpatialAudio(context) })
+                }
+            }
             if (appPreferences.isVisible(MainPageFunction.ImmersiveField)) {
             CollapsibleEffectSection(
                 title = "Immersive field",
@@ -1800,10 +1908,11 @@ private fun ControllerScreen(
 private data class ProfileSaveRequest(val profileId: String?)
 
 @Composable
-private fun ProfileSaveDialog(
+internal fun ProfileSaveDialog(
     title: String,
     profiles: List<AudioFreedomProfile>,
     profileId: String?,
+    currentProfileId: String?,
     name: String,
     deviceGroup: String,
     onProfileChanged: (String?) -> Unit,
@@ -1823,7 +1932,17 @@ private fun ProfileSaveDialog(
         title = { Text(title) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text("Save to", style = MaterialTheme.typography.labelLarge)
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    androidx.compose.material3.FilterChip(selected = profileId != null,
+                        onClick = { onProfileChanged(currentProfileId ?: profiles.firstOrNull()?.id) },
+                        enabled = profiles.isNotEmpty(),
+                        label = { Text("Update existing") })
+                    Spacer(Modifier.width(8.dp))
+                    androidx.compose.material3.FilterChip(selected = profileId == null,
+                        onClick = { onProfileChanged(null) }, label = { Text("Save as new") })
+                }
+                if (profileId != null) {
+                Text("Profile to update", style = MaterialTheme.typography.labelLarge)
                 androidx.compose.foundation.layout.Box {
                     TextButton(onClick = { targetMenuExpanded = true }) {
                         Text(
@@ -1837,13 +1956,6 @@ private fun ProfileSaveDialog(
                         expanded = targetMenuExpanded,
                         onDismissRequest = { targetMenuExpanded = false },
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("New profile") },
-                            onClick = {
-                                targetMenuExpanded = false
-                                onProfileChanged(null)
-                            },
-                        )
                         profiles.forEach { profile ->
                             DropdownMenuItem(
                                 text = { Text(profile.displayName) },
@@ -1855,26 +1967,21 @@ private fun ProfileSaveDialog(
                         }
                     }
                 }
+                }
                 OutlinedTextField(
                     value = name,
                     onValueChange = onNameChange,
                     label = { Text("Profile name") },
                     singleLine = true,
                 )
-                OutlinedTextField(
-                    value = deviceGroup,
-                    onValueChange = { onDeviceGroupChange(it.take(100)) },
-                    label = { Text("Device group (optional)") },
-                    placeholder = { Text("Sony Amp, headphones, speakers") },
-                    singleLine = true,
-                )
-                if (duplicate) Text("Choose the existing profile above to update it, or use another name.",
+                ProfileGroupSelector(deviceGroup, profileGroups(profiles), onDeviceGroupChange)
+                if (duplicate) Text("A profile with this name is already in this group. Choose Update existing or use another name.",
                     color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
         },
         confirmButton = {
             TextButton(onClick = onSave, enabled = name.isNotBlank() && !duplicate) {
-                Text("Save")
+                Text(if (profileId == null) "Create profile" else "Update profile")
             }
         },
         dismissButton = {
@@ -1954,7 +2061,7 @@ private fun CollapsibleEffectSection(
 }
 
 @Composable
-private fun SettingSlider(
+internal fun SettingSlider(
     label: String,
     valueLabel: String,
     value: Float,
@@ -2023,12 +2130,14 @@ internal fun EqualizerBandRow(
     enabled: Boolean,
     onGainChanged: (Int) -> Unit,
     onGainCommitted: () -> Unit,
+    onSelected: () -> Unit = {},
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().height(52.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, modifier = Modifier.width(44.dp), style = MaterialTheme.typography.bodyMedium)
+        Text(label, modifier = Modifier.width(44.dp).clickable(enabled = enabled, onClick = onSelected),
+            style = MaterialTheme.typography.bodyMedium)
         Slider(
             value = gainMillibels.toFloat(),
             onValueChange = { onGainChanged(quantizeGain(it, -gainLimit, gainLimit)) },

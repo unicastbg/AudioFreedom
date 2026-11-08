@@ -34,7 +34,7 @@ internal fun groupedProfiles(
 internal fun ProfileBrowserRow(
     profiles: List<AudioFreedomProfile>, selectedProfileId: String?, profileModified: Boolean,
     onProfileSelected: (AudioFreedomProfile) -> Unit, onAdd: () -> Unit,
-    onSave: () -> Unit, onDelete: () -> Unit,
+    onSave: () -> Unit, onManage: () -> Unit,
     routeLabel: String? = null, assignedProfileId: String? = null,
     onAssignDefault: ((String?) -> Unit)? = null,
 ) {
@@ -42,7 +42,7 @@ internal fun ProfileBrowserRow(
     var open by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var pendingSwitch by remember { mutableStateOf<AudioFreedomProfile?>(null) }
-    var confirmDelete by remember { mutableStateOf(false) }
+    var collapsed by remember { mutableStateOf(emptySet<String>()) }
     Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).clickable { query = ""; open = true }.padding(vertical = 8.dp)) {
             Text("Profile", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -58,16 +58,21 @@ internal fun ProfileBrowserRow(
         }
         IconButton(onClick = onAdd) { Icon(Icons.Rounded.Add, "Save as new profile") }
         IconButton(onClick = onSave) { Icon(Icons.Rounded.Save, "Save current settings") }
-        IconButton(onClick = { confirmDelete = true }, enabled = selected != null) {
-            Icon(Icons.Rounded.Delete, "Delete selected profile")
+        IconButton(onClick = onManage) {
+            Icon(Icons.Rounded.FolderOpen, "Manage profiles")
         }
     }
     if (open) ModalBottomSheet(onDismissRequest = { open = false },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-            Text("Profiles", style = MaterialTheme.typography.titleLarge)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Profiles", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                TextButton(onClick = { open = false; onManage() }) {
+                    Icon(Icons.Rounded.FolderOpen, null); Text("Manage")
+                }
+            }
             OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                label = { Text("Search profiles or devices") }, singleLine = true,
+                label = { Text("Search profiles or groups") }, singleLine = true,
                 leadingIcon = { Icon(Icons.Rounded.Search, null) })
             val groups = groupedProfiles(profiles, query)
             if (onAssignDefault != null && routeLabel != null) Text("Automatic default for $routeLabel",
@@ -76,10 +81,16 @@ internal fun ProfileBrowserRow(
                 if (groups.isEmpty()) item { Text("No matching profiles", Modifier.padding(vertical = 20.dp)) }
                 groups.forEach { (group, values) ->
                     item(key = "group:$group") {
-                        Text(group.ifEmpty { "Ungrouped" }, Modifier.padding(top = 16.dp, bottom = 4.dp),
-                            color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                        Row(Modifier.fillMaxWidth().clickable {
+                            collapsed = if (group in collapsed) collapsed - group else collapsed + group
+                        }.padding(top = 16.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(if (group in collapsed && query.isBlank()) Icons.Rounded.ChevronRight else Icons.Rounded.ExpandMore, null)
+                            Text(group.ifEmpty { "Ungrouped" }, Modifier.weight(1f),
+                                color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                            Text(values.size.toString(), style = MaterialTheme.typography.labelSmall)
+                        }
                     }
-                    items(values, key = { it.id }) { profile ->
+                    if (group !in collapsed || query.isNotBlank()) items(values, key = { it.id }) { profile ->
                         Row(Modifier.fillMaxWidth().clickable {
                             open = false
                             if (profileModified) pendingSwitch = profile
@@ -109,9 +120,4 @@ internal fun ProfileBrowserRow(
         text = { Text("Switch to ${profile.name}? Your current adjustments have not been saved to a profile.") },
         confirmButton = { TextButton(onClick = { pendingSwitch = null; onProfileSelected(profile) }) { Text("Switch") } },
         dismissButton = { TextButton(onClick = { pendingSwitch = null }) { Text("Keep editing") } }) }
-    if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false },
-        title = { Text("Delete ${selected?.name.orEmpty()}?") },
-        text = { Text("The saved profile and its automatic device assignments will be removed. Current sound settings are kept.") },
-        confirmButton = { TextButton(onClick = { confirmDelete = false; onDelete() }) { Text("Delete") } },
-        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } })
 }

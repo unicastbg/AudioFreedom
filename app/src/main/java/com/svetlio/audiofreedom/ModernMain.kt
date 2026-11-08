@@ -938,15 +938,17 @@ private fun effectIcon(title: String): ImageVector = when (title) {
 
 /** Small read-only curve shown on the Equalizer tile. */
 @Composable
-internal fun EqualizerMiniCurve(gains: List<Int>, enabled: Boolean, gainLimit: Int = StandardEqualizerGainLimit) {
+internal fun EqualizerMiniCurve(gains: List<Int>, enabled: Boolean, gainLimit: Int = StandardEqualizerGainLimit,
+                                qValues: List<Int> = List(10) { DefaultEqualizerQ }) {
     val colors = MaterialTheme.colorScheme
     val line = if (enabled) colors.primary else colors.onSurfaceVariant
     val zero = colors.outlineVariant
+    val response = remember(gains, qValues) { responseSamples(gains, qValues) }
     Canvas(Modifier.fillMaxWidth().height(40.dp).padding(top = 6.dp)) {
         val pad = 4.dp.toPx()
         drawLine(zero, Offset(0F, size.height / 2), Offset(size.width, size.height / 2), 1.dp.toPx())
         drawPath(
-            curvePath(gains, pad, inset = 0F, gainLimit = gainLimit),
+            curvePath(response, pad, inset = 0F, gainLimit = gainLimit),
             line,
             style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round),
         )
@@ -956,6 +958,10 @@ internal fun EqualizerMiniCurve(gains: List<Int>, enabled: Boolean, gainLimit: I
 @Composable
 internal fun ModernEqualizerEditor(
     bandGains: List<Int>,
+    qValues: List<Int> = List(10) { DefaultEqualizerQ },
+    bandwidthEnabled: Boolean = true,
+    onQChange: (Int, Int) -> Unit = { _, _ -> },
+    onResetQ: () -> Unit = {},
     preampMillibels: Int,
     enabled: Boolean,
     gainLimit: Int = StandardEqualizerGainLimit,
@@ -993,6 +999,7 @@ internal fun ModernEqualizerEditor(
 
         ResponseCurve(
             gains = bandGains,
+            qValues = qValues,
             selected = band,
             enabled = enabled,
             gainLimit = gainLimit,
@@ -1053,9 +1060,12 @@ internal fun ModernEqualizerEditor(
             }
         }
 
+        EqualizerBandwidthControls(qValues, band, { selectedBand = it }, enabled && bandwidthEnabled,
+            onQChange, onCommit, onResetQ)
+
         PreampControl(
             preampMillibels = preampMillibels,
-            maxBoostMillibels = bandGains.maxOrNull()?.coerceAtLeast(0) ?: 0,
+            maxBoostMillibels = remember(bandGains, qValues) { estimatedEqPeakBoost(bandGains, qValues) },
             enabled = enabled,
             onPreampChange = onPreampChange,
             onCommit = onCommit,
@@ -1066,6 +1076,7 @@ internal fun ModernEqualizerEditor(
 @Composable
 private fun ResponseCurve(
     gains: List<Int>,
+    qValues: List<Int>,
     selected: Int,
     enabled: Boolean,
     gainLimit: Int,
@@ -1080,6 +1091,7 @@ private fun ResponseCurve(
     val zero = colors.outline
     val handleFill = colors.surfaceContainerLow
     val currentGains by rememberUpdatedState(gains)
+    val response = remember(gains, qValues) { responseSamples(gains, qValues) }
     val select by rememberUpdatedState(onSelect)
     val change by rememberUpdatedState(onBandChange)
     val commit by rememberUpdatedState(onCommit)
@@ -1095,7 +1107,7 @@ private fun ResponseCurve(
         Column(Modifier.padding(12.dp)) {
             Row {
                 Text(
-                    if (rack) "RESPONSE" else "Response",
+                    if (rack) "RESPONSE · 48 KHZ" else "Response · 48 kHz",
                     color = colors.onSurfaceVariant,
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.weight(1F),
@@ -1147,8 +1159,8 @@ private fun ResponseCurve(
                     1.5.dp.toPx(),
                     pathEffect = PathEffect.dashPathEffect(floatArrayOf(6F, 8F)),
                 )
-                val path = curvePath(gains, pad, inset, gainLimit)
-                val area = curvePath(gains, pad, inset, gainLimit).apply {
+                val path = curvePath(response, pad, inset, gainLimit)
+                val area = curvePath(response, pad, inset, gainLimit).apply {
                     lineTo(size.width, size.height)
                     lineTo(0F, size.height)
                     close()
@@ -1315,7 +1327,7 @@ private fun PreampControl(
     val colors = MaterialTheme.colorScheme
     val style = LocalLayoutStyle.current
     val rack = style == LayoutStyle.Rack
-    // How far the loudest boosted band can push a full-scale signal above 0 dBFS.
+    // Reference frequency-response estimate, not a guarantee against transient clipping.
     val overshoot = preampMillibels + maxBoostMillibels
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1343,7 +1355,7 @@ private fun PreampControl(
                 Text(
                     String.format(
                         Locale.US,
-                        "Boosts can push peaks %.1f dB over full scale before the limiter",
+                        "Estimated EQ headroom shortfall: %.1f dB",
                         overshoot / 100F,
                     ),
                     color = if (rack) colors.primary else colors.tertiary,
@@ -1362,7 +1374,7 @@ private fun PreampControl(
             }
         } else {
             Text(
-                "Headroom OK: the boosts can't clip",
+                "Estimated EQ headroom OK",
                 color = if (style == LayoutStyle.Cards) colors.primary else colors.secondary,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -1406,18 +1418,16 @@ private fun DrawScope.gainY(gain: Int, pad: Float, gainLimit: Int): Float =
 private fun DrawScope.bandX(index: Int, count: Int, inset: Float): Float =
     inset + index * (size.width - 2 * inset) / (count - 1)
 
-/** Smooth curve through the band points, extended flat to both edges. */
-private fun DrawScope.curvePath(gains: List<Int>, pad: Float, inset: Float, gainLimit: Int): Path {
-    val points = gains.mapIndexed { index, gain -> Offset(bandX(index, gains.size, inset), gainY(gain, pad, gainLimit)) }
+private fun responseSamples(gains: List<Int>, qValues: List<Int>): List<Float> =
+    List(161) { index -> equalizerResponseDb(gains, qValues, 31.25 * Math.pow(512.0, index / 160.0)) }
+
+private fun DrawScope.curvePath(response: List<Float>, pad: Float, inset: Float, gainLimit: Int): Path {
     return Path().apply {
-        moveTo(0F, points.first().y)
-        lineTo(points.first().x, points.first().y)
-        for (index in 1 until points.size) {
-            val a = points[index - 1]
-            val b = points[index]
-            val midX = (a.x + b.x) / 2
-            cubicTo(midX, a.y, midX, b.y, b.x, b.y)
+        response.forEachIndexed { index, db ->
+            val fraction = index.toFloat() / (response.size - 1)
+            val y = gainY((db * 100).toInt().coerceIn(-gainLimit, gainLimit), pad, gainLimit)
+            val x = inset + fraction * (size.width - 2 * inset)
+            if (index == 0) moveTo(x, y) else lineTo(x, y)
         }
-        lineTo(size.width, points.last().y)
     }
 }

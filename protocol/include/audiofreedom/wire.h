@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <utility>
 
 namespace audiofreedom::protocol {
 
@@ -177,6 +178,43 @@ constexpr WireMessage make_limiter_configuration(
                     static_cast<std::uint32_t>(configuration.threshold_millibels));
     detail::put_u32(message.payload, 8, configuration.release_milliseconds);
     return message;
+}
+
+constexpr WireMessage make_equalizer_q(const std::array<std::uint32_t, 10>& q) noexcept {
+    WireMessage message{.parameter_id = ParameterId::kEqualizerQ, .payload_size = 20};
+    for (std::size_t band = 0; band < q.size(); ++band) {
+        detail::put_u16(message.payload, band * 2, static_cast<std::uint16_t>(q[band]));
+    }
+    return message;
+}
+
+constexpr std::optional<std::array<std::uint32_t, 10>> read_equalizer_q(
+        const WireMessage& message) noexcept {
+    if (message.parameter_id != ParameterId::kEqualizerQ || message.payload_size != 20)
+        return std::nullopt;
+    std::array<std::uint32_t, 10> q{};
+    for (std::size_t band = 0; band < q.size(); ++band) {
+        q[band] = detail::get_u16(message.payload, band * 2);
+        if (q[band] < 30 || q[band] > 500) return std::nullopt;
+    }
+    return q;
+}
+
+constexpr WireMessage make_stereo_routing(std::uint32_t mode, std::int32_t balance) noexcept {
+    WireMessage message{.parameter_id = ParameterId::kStereoRouting, .payload_size = 8};
+    detail::put_u32(message.payload, 0, mode);
+    detail::put_u32(message.payload, 4, static_cast<std::uint32_t>(balance));
+    return message;
+}
+
+constexpr std::optional<std::pair<std::uint32_t, std::int32_t>> read_stereo_routing(
+        const WireMessage& message) noexcept {
+    if (message.parameter_id != ParameterId::kStereoRouting || message.payload_size != 8)
+        return std::nullopt;
+    const auto mode = detail::get_u32(message.payload, 0);
+    const auto balance = static_cast<std::int32_t>(detail::get_u32(message.payload, 4));
+    if (mode > 4 || balance < -100 || balance > 100) return std::nullopt;
+    return std::pair{mode, balance};
 }
 
 constexpr WireMessage make_dynamic_bass_configuration(

@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.1.0
+
+- Preserved current DSP edits when the main activity is recreated on rotation;
+  restoring an already-enabled service no longer forces its linked profile.
+- Added visible stereo-routing bypass status for mono and multichannel streams.
+- Added explicit consent for temporary system spatial-audio control, with restoration
+  when routing/processing stops or the output changes, plus crash-recovery ownership.
+- Added installed release notes from the app name in Settings > Updates, using the
+  same dialog and highlights as the first-open popup.
+- Added a dedicated profile manager with multi-select group moves, rename, duplicate
+  and delete actions, plus group rename and removal without deleting profiles.
+- Separated quick profile selection from management, with collapsible groups and
+  existing-group selection when saving.
+- Added per-band EQ bandwidth (Q 0.30-5.00), numeric entry and bandwidth reset.
+- Updated EQ response graphs to include bandwidth and overlapping filters.
+- Added Stereo routing: Normal, Swap L/R, Mono and Single output, plus balance.
+- Preserved routing and bandwidth in profiles, A/B comparisons and undo snapshots.
+- Includes a matching 1.1.0 driver; updating the module and rebooting is required.
+
 ## 1.0.0
 
 - Fixed the Xperia LOS 24 processing suspension with an automatic media-session fallback

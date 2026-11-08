@@ -9,7 +9,6 @@ namespace audiofreedom {
 
 namespace {
 
-constexpr float kGraphicEqQ = 1.4F;
 constexpr std::int32_t kSilenceMillibels = -12000;
 
 std::int32_t linearToMillibels(const float linear) noexcept {
@@ -100,6 +99,24 @@ void Engine::set_equalizer_enabled(const bool enabled) noexcept {
     if (equalizer_enabled_.exchange(enabled, std::memory_order_acq_rel) != enabled) {
         equalizer_revision_.fetch_add(1, std::memory_order_release);
     }
+}
+
+bool Engine::set_eq_band_q(const std::size_t band, const std::uint32_t hundredths) noexcept {
+    if (band >= kEqBandCount || hundredths < 30 || hundredths > 500) return false;
+    if (eq_band_q_[band].exchange(hundredths, std::memory_order_acq_rel) != hundredths) {
+        equalizer_revision_.fetch_add(1, std::memory_order_release);
+    }
+    return true;
+}
+
+std::uint32_t Engine::eq_band_q(const std::size_t band) const noexcept {
+    return band < kEqBandCount ? eq_band_q_[band].load(std::memory_order_acquire) : 140;
+}
+
+void Engine::set_stereo_routing(const std::uint32_t mode,
+                                const std::int32_t balance_percent) noexcept {
+    const auto balance = static_cast<std::uint32_t>(std::clamp(balance_percent, -100, 100) + 100);
+    stereo_routing_.store((balance << 16U) | (mode <= 4 ? mode : 0), std::memory_order_release);
 }
 
 bool Engine::equalizer_enabled() const noexcept {
@@ -366,7 +383,8 @@ void Engine::refresh_equalizer() noexcept {
         const float amplitude = std::pow(10.0F, gain_db / 40.0F);
         const float omega = 2.0F * std::numbers::pi_v<float> * frequency / sample_rate;
         const float cosine = std::cos(omega);
-        const float alpha = std::sin(omega) / (2.0F * kGraphicEqQ);
+        const float q = static_cast<float>(eq_band_q(band)) / 100.0F;
+        const float alpha = std::sin(omega) / (2.0F * q);
         const float a0 = 1.0F + alpha / amplitude;
 
         eq_coefficients_[band] = {
@@ -823,6 +841,22 @@ bool Engine::process(float* const samples, const std::size_t frame_count) noexce
                         (reverb_delay_index_ + 1) % kReverbDelayCapacity;
             }
 
+            // Route after spatial effects, before level matching and output protection.
+            if (config_.channel_count == 2 && config_.front_pair_verified) {
+                const auto routing = stereo_routing_.load(std::memory_order_acquire);
+                const auto mode = routing & 0xffffU;
+                const auto balance = static_cast<int>(routing >> 16U) - 100;
+                auto* pair = samples + frame * 2;
+                if (mode == 1) std::swap(pair[0], pair[1]);
+                if (mode >= 2) {
+                    const float mono = 0.5F * pair[0] + 0.5F * pair[1];
+                    pair[0] = mode == 4 ? 0.0F : mono;
+                    pair[1] = mode == 3 ? 0.0F : mono;
+                } else {
+                    pair[0] *= 1.0F - static_cast<float>(std::max(balance, 0)) / 100.0F;
+                    pair[1] *= 1.0F + static_cast<float>(std::min(balance, 0)) / 100.0F;
+                }
+            }
             leveler_.process_frame(samples + frame * config_.channel_count,
                                    config_.channel_count);
             float frame_peak = 0.0F;

@@ -6,6 +6,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DspStreamInfoTest {
+    @org.junit.Test fun routingReportsMultichannelBypassWithoutTurningItsSettingOff() {
+        val settings = AudioFreedomSettings(stereoRoutingEnabled = true)
+        org.junit.Assert.assertEquals("Bypassed · 12-channel stream",
+            stereoRoutingSummary(settings, DspStreamInfo(1, 48000, 12, 1)))
+        org.junit.Assert.assertEquals("Normal", stereoRoutingSummary(settings, DspStreamInfo(1, 48000, 2, 1)))
+        org.junit.Assert.assertTrue(settings.stereoRoutingEnabled)
+    }
     private fun info(sequence: Int, rate: Int = 48000) = DspStreamInfo(sequence, rate, 2, 1)
     @Test fun onlyAdvancingCallbacksBecomeLiveAndExpireWhenPlaybackStops() {
         val tracker = DspStreamTracker()

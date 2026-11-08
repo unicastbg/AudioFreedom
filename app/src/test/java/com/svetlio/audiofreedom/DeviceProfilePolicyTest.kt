@@ -30,6 +30,7 @@ class DeviceProfilePolicyTest {
 
     @Test
     fun explicitServiceActionsPreserveManualSettings() {
+        assertFalse(shouldApplyAssignedProfileOnServiceStart(AudioFreedomService.ACTION_RESUME))
         assertFalse(
             shouldApplyAssignedProfileOnServiceStart(
                 "com.svetlio.audiofreedom.action.APPLY_SETTINGS",

@@ -8,7 +8,7 @@ namespace audiofreedom::protocol {
 
 inline constexpr std::uint32_t kMagic = 0x31584641;  // "AFX1" in little-endian wire order.
 inline constexpr std::uint16_t kProtocolMajor = 1;
-inline constexpr std::uint16_t kProtocolMinor = 10;
+inline constexpr std::uint16_t kProtocolMinor = 11;
 
 enum class ParameterId : std::uint32_t {
     kProtocolVersion = 0x0000,
@@ -17,6 +17,8 @@ enum class ParameterId : std::uint32_t {
     kEqualizerEnabled = 0x1100,
     kEqualizerBandMillibels = 0x1101,
     kEqualizerConfiguration = 0x1102,
+    kEqualizerQ = 0x1103,
+    kStereoRouting = 0x1900,
     kLimiterConfiguration = 0x1200,
     kDynamicBassConfiguration = 0x1300,
     kDetailRecoveryConfiguration = 0x1400,

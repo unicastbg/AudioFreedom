@@ -147,6 +147,8 @@ internal fun SettingsScreen(
 ) {
     val context = LocalContext.current
     var profileMenuExpanded by remember { mutableStateOf(false) }
+    var installedNotesOpen by remember { mutableStateOf(false) }
+    if (installedNotesOpen) InstalledReleaseNotesDialog { installedNotesOpen = false }
     var updateState by remember { mutableStateOf<UpdateSectionState>(UpdateSectionState.Idle) }
     var pendingAppUpdate by remember { mutableStateOf(AppUpdateDownloader.pending(context)) }
     var appDownloadState by remember { mutableStateOf<AppDownloadState>(AppDownloadState.None) }
@@ -489,7 +491,8 @@ internal fun SettingsScreen(
         ) {
             Icon(Icons.Rounded.SystemUpdate, contentDescription = null)
             Column(modifier = Modifier.padding(start = 16.dp).weight(1F)) {
-                Text("AudioFreedom ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyLarge)
+                Text("AudioFreedom ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.clickable { installedNotesOpen = true }.padding(vertical = 8.dp))
                 Text(
                     text = when (val state = updateState) {
                         UpdateSectionState.Idle -> "Check GitHub for a newer release"

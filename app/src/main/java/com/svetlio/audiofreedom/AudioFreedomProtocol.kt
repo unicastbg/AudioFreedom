@@ -4,7 +4,7 @@ private const val WireMessageSize = 40
 private const val WireHeaderSize = 16
 private const val Magic = 0x31584641
 private const val ProtocolMajor = 1
-private const val ProtocolMinor = 10
+private const val ProtocolMinor = 11
 private const val ParameterPreamp = 0x1001
 private const val ParameterEqualizerEnabled = 0x1100
 private const val ParameterEqualizerBand = 0x1101
@@ -28,6 +28,20 @@ internal data class AudioOutputMetrics(
 )
 
 internal object AudioFreedomProtocol {
+    fun equalizerQ(settings: AudioFreedomSettings): ByteArray = message(0x1103, 20).also { target ->
+        settings.bandQHundredths.forEachIndexed { band, q -> putShort(target, 16 + band * 2, q) }
+    }
+
+    fun stereoRouting(settings: AudioFreedomSettings): ByteArray = message(0x1900, 8).also {
+        val mode = if (!settings.stereoRoutingEnabled) 0 else when (settings.stereoRoutingMode) {
+            StereoRoutingMode.Normal -> 0
+            StereoRoutingMode.Swap -> 1
+            StereoRoutingMode.Mono -> 2
+            StereoRoutingMode.SingleOutput -> if (settings.stereoOutputRight) 4 else 3
+        }
+        putInt(it, 16, mode)
+        putInt(it, 20, if (settings.stereoRoutingEnabled) settings.stereoBalancePercent else 0)
+    }
     fun enabledQuery(): ByteArray = message(0x1000, 0)
     fun processingEnabled(enabled: Boolean): ByteArray = message(0x1000, 1).also {
         it[WireHeaderSize] = if (enabled) 1 else 0

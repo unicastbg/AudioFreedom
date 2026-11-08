@@ -14,6 +14,12 @@ internal data class DspStreamFrame(val value: DspStreamInfo, val observedAt: Lon
     fun isFresh(now: Long): Boolean = now >= observedAt && now - observedAt < 1500L
 }
 
+internal fun stereoRoutingSummary(settings: AudioFreedomSettings, stream: DspStreamInfo?): String = when {
+    !settings.stereoRoutingEnabled -> "Off"
+    stream != null && stream.channels != 2 -> "Bypassed · ${stream.channels}-channel stream"
+    else -> settings.stereoRoutingMode.label
+}
+
 internal class DspStreamTracker {
     private var lastSequence: Int? = null
     private var frame: DspStreamFrame? = null

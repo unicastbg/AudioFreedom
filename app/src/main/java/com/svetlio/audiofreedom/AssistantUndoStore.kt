@@ -50,6 +50,11 @@ internal object SettingsSnapshotCodec {
         .put("extendedEqualizerRange", extendedEqualizerRange)
         .put("preampMillibels", preampMillibels)
         .put("bandGainsMillibels", JSONArray(bandGainsMillibels))
+        .put("bandQHundredths", JSONArray(bandQHundredths))
+        .put("stereoRoutingEnabled", stereoRoutingEnabled)
+        .put("stereoRoutingMode", stereoRoutingMode.ordinal)
+        .put("stereoOutputRight", stereoOutputRight)
+        .put("stereoBalancePercent", stereoBalancePercent)
         .put("dynamicBassEnabled", dynamicBassEnabled)
         .put("bassBoostMillibels", bassBoostMillibels)
         .put("bassCutoffHz", bassCutoffHz)
@@ -90,6 +95,14 @@ internal object SettingsSnapshotCodec {
             bandGainsMillibels = List(EqualizerBandCount) { index ->
                 bands?.optInt(index, 0)?.coerceIn(-gainLimit, gainLimit) ?: 0
             },
+            bandQHundredths = List(EqualizerBandCount) { index ->
+                optJSONArray("bandQHundredths")?.optInt(index, DefaultEqualizerQ)?.coerceIn(30, 500)
+                    ?: DefaultEqualizerQ
+            },
+            stereoRoutingEnabled = optBoolean("stereoRoutingEnabled", false),
+            stereoRoutingMode = StereoRoutingMode.entries.getOrElse(optInt("stereoRoutingMode", 0)) { StereoRoutingMode.Normal },
+            stereoOutputRight = optBoolean("stereoOutputRight", false),
+            stereoBalancePercent = optInt("stereoBalancePercent", 0).coerceIn(-100, 100),
             dynamicBassEnabled = optBoolean(
                 "dynamicBassEnabled",
                 defaults.dynamicBassEnabled,

@@ -45,6 +45,60 @@ class ProfileBrowserPersistenceTest {
         assertEquals(two, profiles.first { it.id == two.id })
     }
 
+    @Test fun bandwidthAndRoutingSurviveSettingsProfilesAndSnapshots() = isolated { context ->
+        val settings = AudioFreedomSettings(bandQHundredths = List(10) { 30 + it * 50 },
+            stereoRoutingEnabled = true, stereoRoutingMode = StereoRoutingMode.SingleOutput,
+            stereoOutputRight = true, stereoBalancePercent = 55)
+        AudioFreedomSettingsStore.save(context, settings)
+        assertEquals(settings, AudioFreedomSettingsStore.load(context))
+        val profile = AudioFreedomProfileStore.save(context, "Custom Q", settings)
+        assertEquals(settings, AudioFreedomProfileStore.list(context).single().settings)
+        assertEquals(settings, SettingsSnapshotCodec.decode(SettingsSnapshotCodec.encode(settings)))
+        AudioFreedomProfileStore.delete(context, profile.id)
+        assertTrue(AudioFreedomProfileStore.list(context).isEmpty())
+    }
+
+    @Test fun managerMovesFiveProfilesWithoutSavingLiveSoundOrChangingDeviceLinks() = isolated { context ->
+        val saved = (1..5).map { AudioFreedomProfileStore.save(context, "Sound $it",
+            AudioFreedomSettings(bandQHundredths = List(10) { 200 + it })) }
+        val live = AudioFreedomSettings(preampMillibels = -450)
+        AudioFreedomSettingsStore.save(context, live)
+        AppPreferencesStore.assignProfile(context, "bluetooth", saved.first().id)
+        AudioFreedomProfileStore.manage(context, ProfileAction.Move(saved.map { it.id }.toSet(), "Sony Amp"))
+        assertEquals(List(5) { "Sony Amp" }, AudioFreedomProfileStore.list(context).map { it.deviceGroup })
+        assertEquals(saved.map { it.settings }, AudioFreedomProfileStore.list(context).map { it.settings })
+        AudioFreedomProfileStore.manage(context, ProfileAction.RenameGroup("Sony Amp", "HiFi"))
+        AudioFreedomProfileStore.manage(context, ProfileAction.Rename(saved.first().id, "Clear"))
+        assertEquals(live, AudioFreedomSettingsStore.load(context))
+        assertEquals(saved.first().id, AppPreferencesStore.profileForRoute(context, "bluetooth"))
+        AudioFreedomProfileStore.manage(context, ProfileAction.Duplicate(saved.first().id))
+        assertEquals(6, AudioFreedomProfileStore.list(context).size)
+        assertEquals(saved.first().settings, AudioFreedomProfileStore.list(context).first { it.name == "Clear copy" }.settings)
+        AudioFreedomProfileStore.manage(context, ProfileAction.RemoveGroup("HiFi"))
+        assertTrue(AudioFreedomProfileStore.list(context).all { it.deviceGroup.isEmpty() })
+        assertEquals(live, AudioFreedomSettingsStore.load(context))
+        AudioFreedomProfileStore.manage(context, ProfileAction.Delete(setOf(saved.first().id)))
+        assertNull(AppPreferencesStore.profileForRoute(context, "bluetooth"))
+        assertEquals(live, AudioFreedomSettingsStore.load(context))
+    }
+
+    @Test fun failedMovesAreAtomicAndCopiesPreserveRawExtendedEq() = isolated { context ->
+        val one = AudioFreedomProfileStore.save(context, "Clear", AudioFreedomSettings(), deviceGroup = "A")
+        val two = AudioFreedomProfileStore.save(context, "Clear", AudioFreedomSettings(), deviceGroup = "B")
+        assertThrows(IllegalArgumentException::class.java) {
+            AudioFreedomProfileStore.manage(context, ProfileAction.Move(setOf(one.id), "B"))
+        }
+        assertEquals("A", AudioFreedomProfileStore.list(context).first { it.id == one.id }.deviceGroup)
+        assertEquals("B", AudioFreedomProfileStore.list(context).first { it.id == two.id }.deviceGroup)
+        val preferences = context.getSharedPreferences("audiofreedom_profiles", Context.MODE_PRIVATE)
+        preferences.edit().putInt("profile_${one.id}_band_0", 1800).apply()
+        AudioFreedomProfileStore.manage(context, ProfileAction.Duplicate(one.id))
+        val copy = AudioFreedomProfileStore.list(context).first { it.name == "Clear copy" }
+        assertEquals(1800, preferences.getInt("profile_${copy.id}_band_0", 0))
+        AudioFreedomProfileStore.manage(context, ProfileAction.Move(setOf(one.id), "C"))
+        assertEquals(1800, preferences.getInt("profile_${one.id}_band_0", 0))
+    }
+
     @Test fun deletingProfileClearsAllOfItsAssignmentsOnly() = isolated { context ->
         val one = AudioFreedomProfileStore.save(context, "One", AudioFreedomSettings())
         val two = AudioFreedomProfileStore.save(context, "Two", AudioFreedomSettings())

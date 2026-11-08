@@ -13,7 +13,8 @@ internal data class SoundComparison(
         if (slot == ComparisonSlot.A) a else b
 
     fun capture(slot: ComparisonSlot, current: AudioFreedomSettings): SoundComparison {
-        val snapshot = current.copy(bandGainsMillibels = current.bandGainsMillibels.toList())
+        val snapshot = current.copy(bandGainsMillibels = current.bandGainsMillibels.toList(),
+            bandQHundredths = current.bandQHundredths.toList())
         return if (slot == ComparisonSlot.A) copy(a = snapshot, preferredSlot = slot)
             else copy(b = snapshot, preferredSlot = slot)
     }

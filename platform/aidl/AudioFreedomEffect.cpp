@@ -65,6 +65,10 @@ std::atomic<bool> gProcessingEnabled{true};
 std::atomic<int32_t> gPreampMillibels{audiofreedom::Engine::kProofPreampMillibels};
 std::atomic<bool> gEqualizerEnabled{false};
 std::array<std::atomic<int32_t>, audiofreedom::Engine::kEqBandCount> gEqBandMillibels{};
+std::array<std::atomic<uint32_t>, audiofreedom::Engine::kEqBandCount> gEqBandQ{
+        140, 140, 140, 140, 140, 140, 140, 140, 140, 140};
+std::atomic<uint32_t> gRoutingMode{0};
+std::atomic<int32_t> gRoutingBalance{0};
 std::atomic<bool> gDynamicBassEnabled{false};
 std::atomic<int32_t> gBassBoostMillibels{
         audiofreedom::Engine::kDefaultBassBoostMillibels};
@@ -306,7 +310,10 @@ void AudioFreedomEffectContext::syncGlobalSettings() {
     for (size_t band = 0; band < audiofreedom::Engine::kEqBandCount; ++band) {
         (void)mEngine.set_eq_band_millibels(
                 band, gEqBandMillibels[band].load(std::memory_order_acquire));
+        (void)mEngine.set_eq_band_q(band, gEqBandQ[band].load(std::memory_order_acquire));
     }
+    mEngine.set_stereo_routing(gRoutingMode.load(std::memory_order_acquire),
+                               gRoutingBalance.load(std::memory_order_acquire));
     mEngine.set_dynamic_bass_enabled(gDynamicBassEnabled.load(std::memory_order_acquire));
     mEngine.set_bass_boost_millibels(gBassBoostMillibels.load(std::memory_order_acquire));
     mEngine.set_bass_cutoff_hz(gBassCutoffHz.load(std::memory_order_acquire));
@@ -446,6 +453,28 @@ RetCode AudioFreedomEffectContext::setParams(const std::vector<uint8_t>& params)
                                                  std::memory_order_release);
                 }
                 gEqualizerEnabled.store(configuration->enabled, std::memory_order_release);
+                gSettingsRevision.fetch_add(1, std::memory_order_acq_rel);
+            }
+            return RetCode::SUCCESS;
+        }
+        case ParameterId::kEqualizerQ: {
+            const auto q = audiofreedom::protocol::read_equalizer_q(*message);
+            if (!q) return RetCode::ERROR_ILLEGAL_PARAMETER;
+            for (size_t band = 0; band < q->size(); ++band) {
+                (void)mEngine.set_eq_band_q(band, (*q)[band]);
+                if (getSessionId() == 0)
+                    gEqBandQ[band].store((*q)[band], std::memory_order_release);
+            }
+            if (getSessionId() == 0) gSettingsRevision.fetch_add(1, std::memory_order_acq_rel);
+            return RetCode::SUCCESS;
+        }
+        case ParameterId::kStereoRouting: {
+            const auto route = audiofreedom::protocol::read_stereo_routing(*message);
+            if (!route) return RetCode::ERROR_ILLEGAL_PARAMETER;
+            mEngine.set_stereo_routing(route->first, route->second);
+            if (getSessionId() == 0) {
+                gRoutingMode.store(route->first, std::memory_order_release);
+                gRoutingBalance.store(route->second, std::memory_order_release);
                 gSettingsRevision.fetch_add(1, std::memory_order_acq_rel);
             }
             return RetCode::SUCCESS;
@@ -650,6 +679,8 @@ std::optional<std::vector<uint8_t>> AudioFreedomEffectContext::getParams(
                                 mEngine.equalizer_enabled()));
         case ParameterId::kEqualizerBandMillibels:
         case ParameterId::kEqualizerConfiguration:
+        case ParameterId::kEqualizerQ:
+        case ParameterId::kStereoRouting:
         case ParameterId::kLimiterConfiguration:
         case ParameterId::kDynamicBassConfiguration:
         case ParameterId::kDetailRecoveryConfiguration:

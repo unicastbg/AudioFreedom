@@ -88,6 +88,9 @@ public:
     [[nodiscard]] std::int32_t preamp_millibels() const noexcept;
 
     void set_equalizer_enabled(bool enabled) noexcept;
+    [[nodiscard]] bool set_eq_band_q(std::size_t band, std::uint32_t hundredths) noexcept;
+    [[nodiscard]] std::uint32_t eq_band_q(std::size_t band) const noexcept;
+    void set_stereo_routing(std::uint32_t mode, std::int32_t balance_percent) noexcept;
     [[nodiscard]] bool equalizer_enabled() const noexcept;
 
     [[nodiscard]] bool set_eq_band_millibels(std::size_t band,
@@ -178,6 +181,9 @@ private:
     std::atomic<std::int32_t> preamp_millibels_{0};
     std::atomic<bool> equalizer_enabled_{false};
     std::array<std::atomic<std::int32_t>, kEqBandCount> eq_band_millibels_{};
+    std::array<std::atomic<std::uint32_t>, kEqBandCount> eq_band_q_{
+            140, 140, 140, 140, 140, 140, 140, 140, 140, 140};
+    std::atomic<std::uint32_t> stereo_routing_{100U << 16U};
     std::atomic<std::uint64_t> equalizer_revision_{1};
     std::atomic<std::uint64_t> processed_frames_{0};
     std::atomic<bool> limiter_enabled_{true};

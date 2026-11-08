@@ -137,6 +137,11 @@ internal class PlatformEffectController(private val sessionId: Int) : EffectClie
                 AudioFreedomProtocol.equalizerConfiguration(settings),
             )
         if (equalizerConfigured) {
+            val qConfigured = sendParameter(currentEffect, AudioFreedomProtocol.equalizerQ(settings))
+            if (!qConfigured && settings.equalizerEnabled &&
+                settings.bandQHundredths.any { it != DefaultEqualizerQ }) return false
+            val routingConfigured = sendParameter(currentEffect, AudioFreedomProtocol.stereoRouting(settings))
+            if (!routingConfigured && settings.stereoRoutingEnabled) return false
             val dynamicBassConfigured = sendParameter(
                 currentEffect,
                 AudioFreedomProtocol.dynamicBassConfiguration(settings),
@@ -280,6 +285,22 @@ internal class PlatformEffectController(private val sessionId: Int) : EffectClie
 }
 
 class AudioFreedomService : Service() {
+    private val spatialToken = Any()
+    private var spatialStereoDeadline = 0L
+    private var spatialPathRejected = false
+    private val spatialAudio by lazy { SpatialAudioLease(this) { state ->
+        if (currentSpatialOwner === spatialToken) {
+            val previous = currentSpatialAudio
+            if (state == SpatialLeaseState.Active) {
+                spatialStereoDeadline = SystemClock.elapsedRealtime() + 10000
+                spatialPathRejected = false
+            }
+            currentSpatialAudio = if (state == SpatialLeaseState.Idle && spatialPathRejected)
+                SpatialLeaseState.Unsupported else state
+            if (clearsSpatialConsent(previous, state))
+                spatialConsentRoute = null
+        }
+    } }
     private val effectController by lazy { EffectRoutingController(this) }
     private val meterHandler = Handler(Looper.getMainLooper())
     private var foregroundStarted = false
@@ -299,6 +320,7 @@ class AudioFreedomService : Service() {
             }
             currentOutputMetrics = effectController.queryOutputMetrics()
             currentStreamFrame = streamTracker.update(effectController.queryActiveStream(), SystemClock.elapsedRealtime())
+            syncSpatialAudio()
             updateForegroundNotification(isPaused = false)
             if (analysisRequested) {
                 analysisWasRequested = true
@@ -337,9 +359,11 @@ class AudioFreedomService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        currentSpatialOwner = spatialToken
         createNotificationChannel()
         audioManager = getSystemService(AudioManager::class.java)
         currentAudioRoute = AudioRouteDetector.current(this)
+        spatialAudio.recover()
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, meterHandler)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             registerModeChangedListener()
@@ -347,6 +371,11 @@ class AudioFreedomService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_RESTORE_SPATIAL) {
+            spatialConsentRoute = null
+            spatialAudio.stop()
+            spatialAudio.recover()
+        }
         refreshAudioRoute(
             applyAssignedProfile = true,
             updateNotification = false,
@@ -363,6 +392,8 @@ class AudioFreedomService : Service() {
     }
 
     override fun onDestroy() {
+        spatialConsentRoute = null
+        spatialAudio.stop()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             unregisterModeChangedListener()
         }
@@ -397,6 +428,10 @@ class AudioFreedomService : Service() {
     }
 
     private fun applyAudioMode(mode: Int, forceSettings: Boolean = false, retryRecovery: Boolean = false) {
+        if (!isMediaProcessingMode(mode)) {
+            spatialConsentRoute = null
+            spatialAudio.stop()
+        }
         if (isMediaProcessingMode(mode)) {
             val settings = AudioFreedomSettingsStore.load(this)
             if (!effectController.isAttached) {
@@ -505,6 +540,32 @@ class AudioFreedomService : Service() {
         meterHandler.postDelayed(routeRefresh, ROUTE_SETTLE_MILLISECONDS)
     }
 
+    private fun syncSpatialAudio() {
+        val settings = AudioFreedomSettingsStore.load(this)
+        val allowed = spatialConsentRoute
+        if (spatialAudio.state == SpatialLeaseState.Active && spatialStereoDeadline != 0L) {
+            val stereo = currentStreamFrame?.takeIf { it.isFresh(SystemClock.elapsedRealtime()) }?.value?.channels == 2
+            if (stereo) spatialStereoDeadline = 0L
+            else if (SystemClock.elapsedRealtime() >= spatialStereoDeadline) {
+                spatialPathRejected = true
+                spatialConsentRoute = null
+                spatialAudio.stop()
+                return
+            }
+        }
+        if (!settings.needsStereoPath || allowed != null && allowed != currentAudioRoute.id ||
+            !isMediaProcessingMode(audioManager.mode)) {
+            spatialPathRejected = false
+            if (currentSpatialAudio == SpatialLeaseState.Unsupported) currentSpatialAudio = SpatialLeaseState.Idle
+            spatialConsentRoute = null
+            spatialAudio.stop()
+            return
+        }
+        if (allowed == currentAudioRoute.id &&
+            spatialAudio.state in setOf(SpatialLeaseState.Idle, SpatialLeaseState.Error, SpatialLeaseState.Overridden) &&
+            systemSpatialAudioEnabled(this) == true) spatialAudio.start()
+    }
+
     private fun refreshAudioRoute(
         applyAssignedProfile: Boolean,
         updateNotification: Boolean = true,
@@ -513,6 +574,11 @@ class AudioFreedomService : Service() {
         val route = AudioRouteDetector.current(this)
         val routeChanged = route.id != currentAudioRoute.id
         if (routeChanged) {
+            spatialPathRejected = false
+            spatialStereoDeadline = 0L
+            if (currentSpatialAudio == SpatialLeaseState.Unsupported) currentSpatialAudio = SpatialLeaseState.Idle
+            spatialConsentRoute = null
+            spatialAudio.stop()
             streamTracker.reset()
             currentStreamFrame = null
         }
@@ -540,6 +606,34 @@ class AudioFreedomService : Service() {
     }
 
     companion object {
+        @Volatile internal var currentSpatialAudio = SpatialLeaseState.Idle
+            private set
+        @Volatile private var spatialConsentRoute: String? = null
+        private var recovery: SpatialAudioLease? = null
+        private var currentSpatialOwner: Any? = null
+        private const val ACTION_RESTORE_SPATIAL = "com.svetlio.audiofreedom.action.RESTORE_SPATIAL"
+
+        internal fun allowSpatialStereo(context: Context, routeId: String) {
+            spatialConsentRoute = routeId
+            refreshStatus(context)
+        }
+
+        internal fun recoverSpatialAudio(context: Context, force: Boolean = false) {
+            if (isRequestedEnabled(context) || !force && recovery != null) return
+            val token = Any()
+            currentSpatialOwner = token
+            recovery = SpatialAudioLease(context.applicationContext) {
+                if (currentSpatialOwner === token) currentSpatialAudio = it
+            }.also { it.recover() }
+        }
+
+        internal fun restoreSpatialAudio(context: Context) {
+            spatialConsentRoute = null
+            if (isRequestedEnabled(context)) {
+                ContextCompat.startForegroundService(context,
+                    Intent(context, AudioFreedomService::class.java).setAction(ACTION_RESTORE_SPATIAL))
+            } else recoverSpatialAudio(context, force = true)
+        }
         private const val CHANNEL_ID = "audiofreedom_processing"
         private const val NOTIFICATION_ID = 4101
         private const val METER_INTERVAL_MILLISECONDS = 250L
@@ -552,6 +646,8 @@ class AudioFreedomService : Service() {
             "com.svetlio.audiofreedom.action.REFRESH_STATUS"
         private const val ACTION_ANALYSIS =
             "com.svetlio.audiofreedom.action.ANALYSIS"
+        internal const val ACTION_RESUME =
+            "com.svetlio.audiofreedom.action.RESUME"
 
         @Volatile
         internal var currentState: DriverState = DriverState.Detected
@@ -592,6 +688,12 @@ class AudioFreedomService : Service() {
         internal fun isRequestedEnabled(context: Context): Boolean =
             context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
                 .getBoolean(KEY_ENABLED, false)
+
+        internal fun resumeRequestedProcessing(context: Context) {
+            if (!isRequestedEnabled(context)) return
+            ContextCompat.startForegroundService(context,
+                Intent(context, AudioFreedomService::class.java).setAction(ACTION_RESUME))
+        }
 
         internal fun setEnabled(context: Context, enabled: Boolean): DriverState {
             setRequestedEnabled(context, enabled)

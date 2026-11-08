@@ -3,6 +3,11 @@ package com.svetlio.audiofreedom
 import android.content.Context
 
 internal const val EqualizerBandCount = 10
+internal const val DefaultEqualizerQ = 140
+
+internal enum class StereoRoutingMode(val label: String) {
+    Normal("Normal"), Swap("Swap L/R"), Mono("Mono"), SingleOutput("Single output"),
+}
 
 internal val EqualizerBandLabels = listOf(
     "31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k",
@@ -12,6 +17,11 @@ internal data class AudioFreedomSettings(
     val equalizerEnabled: Boolean = false,
     val preampMillibels: Int = 0,
     val bandGainsMillibels: List<Int> = List(EqualizerBandCount) { 0 },
+    val bandQHundredths: List<Int> = List(EqualizerBandCount) { DefaultEqualizerQ },
+    val stereoRoutingEnabled: Boolean = false,
+    val stereoRoutingMode: StereoRoutingMode = StereoRoutingMode.Normal,
+    val stereoOutputRight: Boolean = false,
+    val stereoBalancePercent: Int = 0,
     val extendedEqualizerRange: Boolean = false,
     val dynamicBassEnabled: Boolean = false,
     val bassBoostMillibels: Int = 600,
@@ -42,11 +52,18 @@ internal data class AudioFreedomSettings(
 ) {
     init {
         require(bandGainsMillibels.size == EqualizerBandCount)
+        require(bandQHundredths.size == EqualizerBandCount)
+        require(bandQHundredths.all { it in 30..500 })
+        require(stereoBalancePercent in -100..100)
     }
 }
 
 internal fun EqualizerPreset.applyTo(current: AudioFreedomSettings): AudioFreedomSettings =
     settings.copy(
+        stereoRoutingEnabled = current.stereoRoutingEnabled,
+        stereoRoutingMode = current.stereoRoutingMode,
+        stereoOutputRight = current.stereoOutputRight,
+        stereoBalancePercent = current.stereoBalancePercent,
         dynamicBassEnabled = current.dynamicBassEnabled,
         bassBoostMillibels = current.bassBoostMillibels,
         bassCutoffHz = current.bassCutoffHz,
@@ -261,7 +278,8 @@ internal enum class EqualizerPreset(
             entries.firstOrNull {
                 it.settings.equalizerEnabled == settings.equalizerEnabled &&
                     it.settings.preampMillibels == settings.preampMillibels &&
-                    it.settings.bandGainsMillibels == settings.bandGainsMillibels
+                    it.settings.bandGainsMillibels == settings.bandGainsMillibels &&
+                    it.settings.bandQHundredths == settings.bandQHundredths
             }
     }
 }
@@ -302,6 +320,13 @@ internal object AudioFreedomSettingsStore {
                 preferences.getInt("$KeyBandPrefix$band", 0)
                     .coerceIn(-ExtendedEqualizerGainLimit, ExtendedEqualizerGainLimit)
             },
+            bandQHundredths = List(EqualizerBandCount) { band ->
+                preferences.getInt("eq_q_$band", DefaultEqualizerQ).coerceIn(30, 500)
+            },
+            stereoRoutingEnabled = preferences.getBoolean("routing_enabled", false),
+            stereoRoutingMode = StereoRoutingMode.entries.getOrElse(preferences.getInt("routing_mode", 0)) { StereoRoutingMode.Normal },
+            stereoOutputRight = preferences.getBoolean("routing_right", false),
+            stereoBalancePercent = preferences.getInt("routing_balance", 0).coerceIn(-100, 100),
             dynamicBassEnabled = preferences.getBoolean(KeyDynamicBassEnabled, false),
             bassBoostMillibels = preferences.getInt(KeyBassBoost, 600).coerceIn(0, 1200),
             bassCutoffHz = preferences.getInt(KeyBassCutoff, 95).coerceIn(40, 160),
@@ -377,6 +402,11 @@ internal object AudioFreedomSettingsStore {
             .putInt("leveler_response", settings.levelerResponseMilliseconds.coerceIn(200, 5000))
             .putInt(KeyLimiterThreshold, settings.limiterThresholdMillibels.coerceIn(-600, 0))
             .putInt(KeyLimiterRelease, settings.limiterReleaseMilliseconds.coerceIn(20, 1000))
+        editor.putBoolean("routing_enabled", settings.stereoRoutingEnabled)
+            .putInt("routing_mode", settings.stereoRoutingMode.ordinal)
+            .putBoolean("routing_right", settings.stereoOutputRight)
+            .putInt("routing_balance", settings.stereoBalancePercent)
+        settings.bandQHundredths.forEachIndexed { band, q -> editor.putInt("eq_q_$band", q) }
         settings.bandGainsMillibels.forEachIndexed { band, gain ->
             editor.putInt("$KeyBandPrefix$band", gain.coerceIn(-settings.equalizerGainLimit, settings.equalizerGainLimit))
         }

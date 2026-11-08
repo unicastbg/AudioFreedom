@@ -156,6 +156,20 @@ bool applyMessage(audiofreedom::Engine& engine, const WireMessage& message) {
             }
             return true;
         }
+        case ParameterId::kEqualizerQ: {
+            const auto q = audiofreedom::protocol::read_equalizer_q(message);
+            if (!q) return false;
+            for (std::size_t band = 0; band < q->size(); ++band) {
+                (void)engine.set_eq_band_q(band, (*q)[band]);
+            }
+            return true;
+        }
+        case ParameterId::kStereoRouting: {
+            const auto route = audiofreedom::protocol::read_stereo_routing(message);
+            if (!route) return false;
+            engine.set_stereo_routing(route->first, route->second);
+            return true;
+        }
         case ParameterId::kLimiterConfiguration: {
             const auto value = audiofreedom::protocol::read_limiter_configuration(message);
             if (!value ||

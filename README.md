@@ -28,11 +28,12 @@ software effect chain.
 
 ## Features
 
-The latest release is **1.0.0**. See the [release notes](docs/releases/1.0.0.md)
+The latest release is **1.1.0**. See the [release notes](docs/releases/1.1.0.md)
 for what's new.
 
 - System-wide processing with automatic recovery when Android suspends the global effect
-- Ten-band constant-Q equalizer with preamp, persistent presets, and an optional +/-20 dB range unlock
+- Ten-band equalizer with adjustable per-band Q, preamp, persistent presets, and an optional +/-20 dB range unlock
+- Stereo routing with channel swap, mono, single-channel output and balance; optional temporary system spatial-audio control
 - Bass Foundation with deep-band lift, adaptive restraint, and small-driver support
 - Transient-aware Detail Recovery with linked stereo decisions
 - Immersive Field with width, center, room, crossfeed, and early-reflection processing
@@ -42,7 +43,7 @@ for what's new.
 - Live input, output, and gain-reduction meters
 - On-demand playback analysis with RMS, crest factor, stereo correlation, and a ten-band spectrum
 - Persistent, output-specific A/B snapshots for comparing DSP settings
-- Named profiles with optional automatic assignment by connected output
+- Named profiles with optional automatic assignment by connected output, group management and multi-select moves
 - Phone speaker, wired, USB, HDMI, and Bluetooth route awareness in the app and notification
 - Twelve visual themes with a preview gallery and System, Light, and Dark modes where supported
 - Main-page customization: hide unused effects and keep them disabled while retaining their values
@@ -190,6 +191,10 @@ The app currently targets Android API 36 and has a minimum SDK of 35.
 The universal driver ZIP is bundled as an app asset for offline installation. After
 rebuilding the driver package, `tools/build-universal-module.ps1` synchronizes that asset
 and its SHA-256 metadata before the next APK build.
+
+The temporary spatial-audio helper is also bundled. After changing its Java source,
+run `tools/build-spatial-lease.ps1` before rebuilding the APK; it uses JDK 21 and
+Android SDK 36 to regenerate the private helper asset.
 
 ## Run native tests
 

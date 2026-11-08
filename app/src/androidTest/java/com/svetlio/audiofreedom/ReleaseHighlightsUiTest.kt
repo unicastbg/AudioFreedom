@@ -25,10 +25,10 @@ class ReleaseHighlightsUiTest {
         compose.setContent { CompositionLocalProvider(LocalContext provides context) {
             AudioFreedomTheme(ThemePreference.Light, controlSystemBars = false) { ReleaseHighlightsNotice() }
         } }
-        compose.onNodeWithText("What's new in 1.0.0").assertIsDisplayed()
-        VersionOneHighlights.forEach { compose.onNodeWithText(it).assertIsDisplayed() }
+        compose.onNodeWithText("What's new in ${BuildConfig.VERSION_NAME}").assertIsDisplayed()
+        installedReleaseHighlights(BuildConfig.VERSION_NAME).forEach { compose.onNodeWithText(it).assertIsDisplayed() }
         compose.onNodeWithText("Got it").performClick()
-        compose.onNodeWithText("What's new in 1.0.0").assertDoesNotExist()
+        compose.onNodeWithText("What's new in ${BuildConfig.VERSION_NAME}").assertDoesNotExist()
         org.junit.Assert.assertEquals(BuildConfig.VERSION_CODE,
             context.getSharedPreferences("release_highlights", 0).getInt("seen_version", 0))
     }
