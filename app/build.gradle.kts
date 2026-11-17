@@ -12,8 +12,8 @@ android {
         applicationId = "com.svetlio.audiofreedom"
         minSdk = 35
         targetSdk = 36
-        versionCode = 48
-        versionName = "1.1.0"
+        versionCode = 50
+        versionName = "1.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

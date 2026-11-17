@@ -8,14 +8,21 @@ internal data class AudioFreedomProfile(
     val id: String,
     val name: String,
     val settings: AudioFreedomSettings,
+    /** Old free-text group. No longer groups anything; shown as a small tag if set. */
     val deviceGroup: String = "",
+    /** The output this profile belongs to ([AudioRoute.id]); empty = any device. */
+    val deviceId: String = "",
+    /** That output's name, for when it isn't connected. */
+    val deviceLabel: String = "",
 ) {
-    val displayName: String get() = listOf(deviceGroup, name).filter(String::isNotBlank).joinToString(" / ")
+    val displayName: String get() =
+        listOf(deviceLabel.ifBlank { deviceGroup }, name).filter(String::isNotBlank).joinToString(" / ")
 }
 
 internal object AudioFreedomProfileStore {
     private const val Preferences = "audiofreedom_profiles"
     private const val KeyProfileIds = "profile_ids"
+    private const val KeyDevicesMigrated = "devices_migrated_v1"
 
     fun list(context: Context): List<AudioFreedomProfile> {
         val preferences = context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
@@ -33,6 +40,9 @@ internal object AudioFreedomProfileStore {
         settings: AudioFreedomSettings,
         profileId: String? = null,
         deviceGroup: String? = null,
+        /** Null keeps an existing profile's device (or "any device" for a new one). */
+        deviceId: String? = null,
+        deviceLabel: String? = null,
     ): AudioFreedomProfile {
         val normalizedName = name.trim()
         require(normalizedName.isNotEmpty())
@@ -43,11 +53,17 @@ internal object AudioFreedomProfileStore {
         val group = (deviceGroup ?: profileId?.let {
             preferences.getString(key(it, "device_group"), "")
         }).orEmpty().trim().take(100)
+        val device = (deviceId ?: profileId?.let {
+            preferences.getString(key(it, "device_id"), "")
+        }).orEmpty()
+        val label = (deviceLabel ?: profileId?.let {
+            preferences.getString(key(it, "device_label"), "")
+        }).orEmpty().trim().take(100)
+        // Saving a new profile under a name the same device already has updates that one.
         val id = profileId ?: existingProfiles.firstOrNull { existingId ->
             preferences.getString(key(existingId, "name"), null)
                 ?.equals(normalizedName, ignoreCase = true) == true &&
-                preferences.getString(key(existingId, "device_group"), "").orEmpty()
-                    .equals(group, ignoreCase = true)
+                preferences.getString(key(existingId, "device_id"), "").orEmpty() == device
         } ?: UUID.randomUUID().toString()
         val ids = existingProfiles.toMutableSet().apply { add(id) }
 
@@ -55,11 +71,62 @@ internal object AudioFreedomProfileStore {
             .putStringSet(KeyProfileIds, ids)
             .putString(key(id, "name"), normalizedName)
             .putString(key(id, "device_group"), group)
+            .putString(key(id, "device_id"), device)
+            .putString(key(id, "device_label"), label)
             .putSettings(id, settings)
             .apply()
 
-        return AudioFreedomProfile(id, normalizedName, settings, group)
+        return AudioFreedomProfile(id, normalizedName, settings, group, device, label)
     }
+
+    fun rename(context: Context, profileId: String, name: String) {
+        val normalized = name.trim()
+        require(normalized.isNotEmpty())
+        context.getSharedPreferences(Preferences, Context.MODE_PRIVATE).edit()
+            .putString(key(profileId, "name"), normalized.take(100))
+            .apply()
+    }
+
+    /** Move a profile to another output; an empty [deviceId] means any device. */
+    fun move(context: Context, profileId: String, deviceId: String, deviceLabel: String) {
+        context.getSharedPreferences(Preferences, Context.MODE_PRIVATE).edit()
+            .putString(key(profileId, "device_id"), deviceId)
+            .putString(key(profileId, "device_label"), if (deviceId.isEmpty()) "" else deviceLabel)
+            .apply()
+    }
+
+    /**
+     * One-time move from typed groups to real devices. A profile already set as an
+     * output's profile belongs to that output; one whose group text is the connected
+     * output's name belongs to it; everything else becomes "any device" and keeps its
+     * old group as a tag, so nothing is lost and it can be moved by hand.
+     */
+    fun migrateToDevices(context: Context, current: AudioRoute) {
+        val preferences = context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
+        if (preferences.getBoolean(KeyDevicesMigrated, false)) return
+        val assignments = AppPreferencesStore.routeAssignments(context)   // routeId -> profileId
+        val editor = preferences.edit()
+        preferences.getStringSet(KeyProfileIds, emptySet()).orEmpty().forEach { id ->
+            if (preferences.contains(key(id, "device_id"))) return@forEach
+            val group = preferences.getString(key(id, "device_group"), "").orEmpty().trim()
+            val assignedRoute = assignments.entries.firstOrNull { it.value == id }?.key
+            val (deviceId, label) = when {
+                assignedRoute == current.id -> current.id to current.label
+                assignedRoute != null -> assignedRoute to group.ifBlank { routeLabelFromId(assignedRoute) }
+                group.isNotEmpty() && group.equals(current.label, ignoreCase = true) ->
+                    current.id to current.label
+                else -> "" to ""
+            }
+            editor.putString(key(id, "device_id"), deviceId).putString(key(id, "device_label"), label)
+        }
+        editor.putBoolean(KeyDevicesMigrated, true).apply()
+    }
+
+    /** "bluetooth-sony-wh-1000xm5" -> "Sony Wh 1000xm5": only for outputs we never saw named. */
+    private fun routeLabelFromId(routeId: String): String =
+        routeId.substringAfter('-').split('-').filter { it.isNotBlank() }
+            .joinToString(" ") { it.replaceFirstChar(Char::uppercaseChar) }
+            .ifBlank { "Audio output" }
 
     fun delete(context: Context, profileId: String) {
         val preferences = context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
@@ -68,6 +135,8 @@ internal object AudioFreedomProfileStore {
 
         val editor = preferences.edit().putStringSet(KeyProfileIds, ids)
         editor.remove(key(profileId, "device_group"))
+        editor.remove(key(profileId, "device_id"))
+        editor.remove(key(profileId, "device_label"))
         profileFields.forEach { field -> editor.remove(key(profileId, field)) }
         repeat(EqualizerBandCount) { band -> editor.remove(key(profileId, "band_$band")) }
         repeat(EqualizerBandCount) { band -> editor.remove(key(profileId, "q_$band")) }
@@ -91,6 +160,8 @@ internal object AudioFreedomProfileStore {
                 preferences.edit().putStringSet(KeyProfileIds, ids + newId)
                     .putString(key(newId, "name"), duplicateProfileName(source, profiles))
                     .putString(key(newId, "device_group"), source.deviceGroup)
+                    .putString(key(newId, "device_id"), source.deviceId)
+                    .putString(key(newId, "device_label"), source.deviceLabel)
                     .putSettings(newId, source.settings).apply()
             }
             else -> {
@@ -117,6 +188,8 @@ internal object AudioFreedomProfileStore {
             id = id,
             name = name,
             deviceGroup = preferences.getString(key(id, "device_group"), "").orEmpty(),
+            deviceId = preferences.getString(key(id, "device_id"), "").orEmpty(),
+            deviceLabel = preferences.getString(key(id, "device_label"), "").orEmpty(),
             settings = AudioFreedomSettings(
                 equalizerEnabled = preferences.getBoolean(
                     key(id, "equalizer_enabled"), defaults.equalizerEnabled,

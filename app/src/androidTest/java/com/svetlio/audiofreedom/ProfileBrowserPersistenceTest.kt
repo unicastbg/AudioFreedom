@@ -35,14 +35,32 @@ class ProfileBrowserPersistenceTest {
     }
 
     @Test fun groupsCanReuseNamesAndUpdatesPreserveMetadataAndOtherProfiles() = isolated { context ->
-        val one = AudioFreedomProfileStore.save(context, "Clear", AudioFreedomSettings(), deviceGroup = "Sony Amp")
-        val two = AudioFreedomProfileStore.save(context, "Clear", AudioFreedomSettings(), deviceGroup = "Buds")
+        val one = AudioFreedomProfileStore.save(context, "Clear", AudioFreedomSettings(),
+            deviceId = "bluetooth-sony", deviceLabel = "Sony Amp")
+        val two = AudioFreedomProfileStore.save(context, "Clear", AudioFreedomSettings(),
+            deviceId = "bluetooth-buds", deviceLabel = "Buds")
         assertNotEquals(one.id, two.id)
         AudioFreedomProfileStore.save(context, "Clear", one.settings.copy(preampMillibels = -350), one.id)
         val profiles = AudioFreedomProfileStore.list(context)
         assertEquals(2, profiles.size)
-        assertEquals("Sony Amp", profiles.first { it.id == one.id }.deviceGroup)
+        assertEquals("bluetooth-sony", profiles.first { it.id == one.id }.deviceId)
+        assertEquals("Sony Amp", profiles.first { it.id == one.id }.deviceLabel)
         assertEquals(two, profiles.first { it.id == two.id })
+    }
+
+    @Test fun renamingAnOutputGroupPreservesItsProfilesAndRememberedAssignment() = isolated { context ->
+        val routeId = "bluetooth-sony"
+        val saved = AudioFreedomProfileStore.save(context, "Clear", AudioFreedomSettings(),
+            deviceId = routeId, deviceLabel = "Sony Amp")
+        AppPreferencesStore.assignProfile(context, routeId, saved.id)
+        AppPreferencesStore.setOutputGroupName(context, routeId, " Home HiFi ")
+        AppPreferencesStore.setOutputGroupName(context, "", "Not a device")
+        assertEquals(mapOf(routeId to "Home HiFi"), AppPreferencesStore.outputGroupNames(context))
+        assertEquals(mapOf(routeId to saved.id), AppPreferencesStore.routeAssignments(context))
+        assertEquals(saved, AudioFreedomProfileStore.list(context).single())
+        AppPreferencesStore.setOutputGroupName(context, routeId, "")
+        assertTrue(AppPreferencesStore.outputGroupNames(context).isEmpty())
+        assertEquals(saved.id, AppPreferencesStore.profileForRoute(context, routeId))
     }
 
     @Test fun bandwidthAndRoutingSurviveSettingsProfilesAndSnapshots() = isolated { context ->
@@ -84,7 +102,8 @@ class ProfileBrowserPersistenceTest {
 
     @Test fun failedMovesAreAtomicAndCopiesPreserveRawExtendedEq() = isolated { context ->
         val one = AudioFreedomProfileStore.save(context, "Clear", AudioFreedomSettings(), deviceGroup = "A")
-        val two = AudioFreedomProfileStore.save(context, "Clear", AudioFreedomSettings(), deviceGroup = "B")
+        val two = AudioFreedomProfileStore.save(context, "Clear", AudioFreedomSettings(),
+            profileId = "legacy-b", deviceGroup = "B")
         assertThrows(IllegalArgumentException::class.java) {
             AudioFreedomProfileStore.manage(context, ProfileAction.Move(setOf(one.id), "B"))
         }

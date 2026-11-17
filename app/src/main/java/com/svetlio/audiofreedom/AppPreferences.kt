@@ -78,7 +78,8 @@ internal enum class AssistantVolumeButton(val label: String, val keyCode: Int) {
 internal data class AppPreferences(
     val theme: ThemePreference = ThemePreference.System,
     val appTheme: AppTheme = AppTheme.Classic,
-    val automaticDeviceProfiles: Boolean = false,
+    /** Switch to the profile last used on an output when that output connects. */
+    val automaticDeviceProfiles: Boolean = true,
     val showDeviceInNotification: Boolean = true,
     val hiddenMainPageFunctions: Set<MainPageFunction> = emptySet(),
     val assistantEnabled: Boolean = false,
@@ -134,6 +135,7 @@ internal object AppPreferencesStore {
         "assistant_forward_music_commands"
     private const val KeyAssistantDetailedMusicReplies = "assistant_detailed_music_replies"
     private const val KeyRouteProfilePrefix = "route_profile_"
+    private const val KeyOutputGroupNamePrefix = "output_group_name_"
 
     fun load(context: Context): AppPreferences {
         val preferences = context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
@@ -150,7 +152,7 @@ internal object AppPreferencesStore {
         return AppPreferences(
             theme = theme,
             appTheme = preferences.enumValue(KeyAppTheme, AppTheme.Classic),
-            automaticDeviceProfiles = preferences.getBoolean(KeyAutomaticDeviceProfiles, false),
+            automaticDeviceProfiles = preferences.getBoolean(KeyAutomaticDeviceProfiles, true),
             showDeviceInNotification =
                 preferences.getBoolean(KeyShowDeviceInNotification, true),
             hiddenMainPageFunctions = hiddenMainPageFunctions(
@@ -271,6 +273,23 @@ internal object AppPreferencesStore {
         context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
             .getString("$KeyRouteProfilePrefix$routeId", null)
 
+    fun outputGroupNames(context: Context): Map<String, String> =
+        context.getSharedPreferences(Preferences, Context.MODE_PRIVATE).all
+            .mapNotNull { (key, value) ->
+                if (key.startsWith(KeyOutputGroupNamePrefix) && value is String && value.isNotBlank()) {
+                    key.removePrefix(KeyOutputGroupNamePrefix) to value
+                } else null
+            }.toMap()
+
+    fun setOutputGroupName(context: Context, routeId: String, name: String) {
+        if (routeId.isBlank()) return
+        val key = "$KeyOutputGroupNamePrefix$routeId"
+        val trimmed = name.trim()
+        context.getSharedPreferences(Preferences, Context.MODE_PRIVATE).edit().apply {
+            if (trimmed.isEmpty()) remove(key) else putString(key, trimmed)
+        }.apply()
+    }
+
     fun assignProfile(context: Context, routeId: String, profileId: String?) {
         val editor = context.getSharedPreferences(Preferences, Context.MODE_PRIVATE).edit()
         if (profileId == null) {
@@ -280,6 +299,15 @@ internal object AppPreferencesStore {
         }
         editor.apply()
     }
+
+    /** Every output's remembered profile: routeId -> profileId. */
+    fun routeAssignments(context: Context): Map<String, String> =
+        context.getSharedPreferences(Preferences, Context.MODE_PRIVATE).all
+            .mapNotNull { (key, value) ->
+                if (key.startsWith(KeyRouteProfilePrefix) && value is String) {
+                    key.removePrefix(KeyRouteProfilePrefix) to value
+                } else null
+            }.toMap()
 
     fun removeProfileAssignments(context: Context, profileId: String) {
         val preferences = context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)

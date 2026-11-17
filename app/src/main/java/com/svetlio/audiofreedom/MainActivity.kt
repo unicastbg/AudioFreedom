@@ -216,7 +216,11 @@ private fun ControllerScreen(
     var processingHealth by remember { mutableStateOf(AudioFreedomService.currentHealth) }
     val context = androidx.compose.ui.platform.LocalContext.current
     var appPreferences by remember { mutableStateOf(initialAppPreferences) }
-    var profiles by remember { mutableStateOf(AudioFreedomProfileStore.list(context)) }
+    var profiles by remember {
+        // Typed groups became real devices; sort existing profiles once, before listing.
+        AudioFreedomProfileStore.migrateToDevices(context, AudioRouteDetector.current(context))
+        mutableStateOf(AudioFreedomProfileStore.list(context))
+    }
     var audioRoute by remember { mutableStateOf(AudioRouteDetector.current(context)) }
     var comparison by remember { mutableStateOf(SoundComparisonStore.load(context, audioRoute.id)) }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -1023,9 +1027,22 @@ private fun ControllerScreen(
                 .firstOrNull { it.id == selectedProfileId }
                 ?.settings
                 ?.let { it != settings } == true
+            // Picking a profile also makes it the one this output comes back to.
             val selectProfile: (AudioFreedomProfile) -> Unit = { profile ->
                 commitSettings(profile.settings)
                 selectedProfileId = profile.id
+                AppPreferencesStore.assignProfile(context, audioRoute.id, profile.id)
+                assignedProfileId = profile.id
+            }
+            val profilesChanged: (String?) -> Unit = { selectId ->
+                profiles = AudioFreedomProfileStore.list(context)
+                if (selectId != null) {
+                    selectedProfileId = selectId
+                    AppPreferencesStore.assignProfile(context, audioRoute.id, selectId)
+                } else if (profiles.none { it.id == selectedProfileId }) {
+                    selectedProfileId = null
+                }
+                assignedProfileId = AppPreferencesStore.profileForRoute(context, audioRoute.id)
             }
             val addProfile: () -> Unit = {
                 profileName = ""
@@ -1072,20 +1089,14 @@ private fun ControllerScreen(
                     streamLabel = streamFrame?.takeIf { it.isFresh(analysisNow) }?.value?.label(),
                     processingHealth = processingHealth,
                 )
-                ProfileBrowserRow(
+                DeviceProfilesPanel(
                     profiles = profiles,
+                    settings = settings,
                     selectedProfileId = selectedProfileId,
-                    profileModified = currentProfileModified,
-                    onProfileSelected = selectProfile,
-                    onAdd = addProfile,
-                    onSave = saveProfile,
-                    onManage = { currentPage = ControllerPage.Profiles },
-                    routeLabel = audioRoute.label,
-                    assignedProfileId = assignedProfileId,
-                    onAssignDefault = { id ->
-                        AppPreferencesStore.assignProfile(context, audioRoute.id, id)
-                        assignedProfileId = id
-                    },
+                    route = audioRoute,
+                    rememberedProfileId = assignedProfileId,
+                    onSelect = selectProfile,
+                    onProfilesChanged = profilesChanged,
                 )
             } else {
             DriverStatusRow(driverState, rootAccessState)
@@ -1123,20 +1134,14 @@ private fun ControllerScreen(
                 modifier = Modifier.padding(top = 18.dp),
                 color = MaterialTheme.colorScheme.outlineVariant,
             )
-            ProfileBrowserRow(
+            DeviceProfilesPanel(
                 profiles = profiles,
+                settings = settings,
                 selectedProfileId = selectedProfileId,
-                profileModified = currentProfileModified,
-                onProfileSelected = selectProfile,
-                onAdd = addProfile,
-                onSave = saveProfile,
-                onManage = { currentPage = ControllerPage.Profiles },
-                routeLabel = audioRoute.label,
-                assignedProfileId = assignedProfileId,
-                onAssignDefault = { id ->
-                    AppPreferencesStore.assignProfile(context, audioRoute.id, id)
-                    assignedProfileId = id
-                },
+                route = audioRoute,
+                rememberedProfileId = assignedProfileId,
+                onSelect = selectProfile,
+                onProfilesChanged = profilesChanged,
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }

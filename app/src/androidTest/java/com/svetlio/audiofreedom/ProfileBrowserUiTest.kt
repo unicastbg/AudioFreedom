@@ -12,19 +12,22 @@ import org.junit.Test
 
 class ProfileBrowserUiTest {
     @get:Rule val compose = createComposeRule()
+    private val route = AudioRoute("profile-test-sony", "Sony Amp", AudioRouteKind.Bluetooth)
     private val profiles = (0 until 80).map {
-        AudioFreedomProfile("$it", "Sound $it", AudioFreedomSettings(), if (it % 2 == 0) "Sony Amp" else "Buds")
+        AudioFreedomProfile("$it", "Sound $it", AudioFreedomSettings(),
+            deviceId = if (it % 2 == 0) route.id else "profile-test-buds",
+            deviceLabel = if (it % 2 == 0) route.label else "Buds")
     }
 
     @Test fun pickerRemainsUsableAcrossAllThemes() {
         val theme = mutableStateOf(AppTheme.Classic)
         compose.setContent { AudioFreedomTheme(ThemePreference.Dark, theme.value, controlSystemBars = false) {
-            ProfileBrowserRow(profiles, "0", false, {}, {}, {}, {})
+            DeviceProfilesPanel(profiles, AudioFreedomSettings(), "0", route, null, {}, {})
         } }
         for (value in AppTheme.entries) {
             compose.runOnIdle { theme.value = value }
-            compose.onNodeWithContentDescription("Choose profile").assertIsDisplayed().performClick()
-            compose.onNodeWithText("Search profiles or groups").performTextInput("79")
+            openPicker()
+            compose.onNodeWithText("Search profiles or devices").performTextInput("79")
             compose.onNodeWithText("Sound 79").assertIsDisplayed()
             if (value == AppTheme.Mocha) {
                 val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -36,32 +39,31 @@ class ProfileBrowserUiTest {
         }
     }
 
-    @Test fun searchSelectAndDeviceDefaultWorkWithManyProfiles() {
+    @Test fun searchSelectAndRememberedLabelWorkWithManyProfiles() {
         val selected = mutableStateOf("0")
-        val assigned = mutableStateOf<String?>(null)
+        val assigned = mutableStateOf("0")
         compose.setContent { AudioFreedomTheme(ThemePreference.System, controlSystemBars = false) {
-            ProfileBrowserRow(profiles, selected.value, false, { selected.value = it.id }, {}, {}, {},
-                "Sony Amp", assigned.value, { assigned.value = it })
+            DeviceProfilesPanel(profiles, AudioFreedomSettings(), selected.value, route, assigned.value,
+                { selected.value = it.id; assigned.value = it.id }, {})
         } }
-        compose.onNodeWithContentDescription("Choose profile").performClick()
-        compose.onNodeWithText("Search profiles or groups").performTextInput("79")
+        openPicker()
+        compose.onNodeWithText("Comes back on Sony Amp", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Search profiles or devices").performTextInput("79")
         compose.onNodeWithText("Sound 79").assertIsDisplayed()
-        compose.onNodeWithText("Sound 78").assertDoesNotExist()
-        compose.onNodeWithContentDescription("Set as device default").performClick()
-        compose.runOnIdle { assertEquals("79", assigned.value); assertEquals("0", selected.value) }
-        compose.onNodeWithContentDescription("Remove device default").assertIsDisplayed()
+        compose.onNodeWithText("Sound 78").assertIsNotDisplayed()
         compose.onNodeWithText("Sound 79").performClick()
-        compose.runOnIdle { assertEquals("79", selected.value) }
+        compose.runOnIdle { assertEquals("79", selected.value); assertEquals("79", assigned.value) }
     }
 
     @Test fun unsavedChangesCanBeKeptOrExplicitlyDiscarded() {
         var selected: String? = "0"
         compose.setContent { AudioFreedomTheme(ThemePreference.System, controlSystemBars = false) {
-            ProfileBrowserRow(profiles, "0", true, { selected = it.id }, {}, {}, {})
+            DeviceProfilesPanel(profiles, AudioFreedomSettings(preampMillibels = -300), "0", route, null,
+                { selected = it.id }, {})
         } }
         fun choose() {
-            compose.onNodeWithContentDescription("Choose profile").performClick()
-            compose.onNodeWithText("Search profiles or groups").performTextInput("79")
+            openPicker()
+            compose.onNodeWithText("Search profiles or devices").performTextInput("79")
             compose.onNodeWithText("Sound 79").performClick()
         }
         choose()
@@ -70,5 +72,35 @@ class ProfileBrowserUiTest {
         choose()
         compose.onNodeWithText("Switch").performClick()
         compose.runOnIdle { assertEquals("79", selected) }
+    }
+
+    @Test fun deviceGroupCanBeRenamedAndReset() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val device = route.copy(id = "profile-test-alias", label = "Test amplifier")
+        AppPreferencesStore.setOutputGroupName(context, device.id, "")
+        try {
+            val profile = profiles.first().copy(deviceId = device.id, deviceLabel = device.label)
+            compose.setContent {
+                DeviceProfilesPanel(listOf(profile), profile.settings, profile.id, device, profile.id, {}, {})
+            }
+            openPicker()
+            compose.onNodeWithContentDescription("Rename group: Test amplifier").performClick()
+            compose.onNodeWithText("Group name").performTextReplacement("Home HiFi")
+            compose.onNodeWithText("Save").performClick()
+            compose.onNodeWithContentDescription("Rename group: Home HiFi").assertIsDisplayed()
+            compose.onNodeWithText("Comes back on Home HiFi", substring = true).assertIsDisplayed()
+            assertEquals("Home HiFi", AppPreferencesStore.outputGroupNames(context)[device.id])
+            compose.onNodeWithContentDescription("Rename group: Home HiFi").performClick()
+            compose.onNodeWithText("Use device name").performClick()
+            compose.onNodeWithContentDescription("Rename group: Test amplifier").assertIsDisplayed()
+            assertNull(AppPreferencesStore.outputGroupNames(context)[device.id])
+        } finally {
+            AppPreferencesStore.setOutputGroupName(context, device.id, "")
+        }
+    }
+
+    private fun openPicker() {
+        compose.onNode(hasContentDescription("All profiles") and hasClickAction())
+            .assertIsDisplayed().performClick()
     }
 }

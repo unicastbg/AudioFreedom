@@ -158,8 +158,18 @@ private fun ThemePreviewContent(theme: AppTheme) {
                 listOf(-4500, -3000, -2000, -2800, -3200, -3800, -2900, -4000, -4800, -5500),
                 true, {}, outputRmsMillibels = -2000)
         }
-        ProfileBrowserRow(listOf(AudioFreedomProfile("preview", "Headphones", AudioFreedomSettings())),
-            "preview", false, {}, {}, {}, {})
+        val previewRoute = AudioRoute("preview-headphones", "Headphones", AudioRouteKind.WiredHeadphones)
+        val previewSettings = AudioFreedomSettings()
+        DeviceProfilesPanel(
+            profiles = listOf(AudioFreedomProfile("preview", "Clear", previewSettings,
+                deviceId = previewRoute.id, deviceLabel = previewRoute.label)),
+            settings = previewSettings,
+            selectedProfileId = "preview",
+            route = previewRoute,
+            rememberedProfileId = "preview",
+            onSelect = {},
+            onProfilesChanged = {},
+        )
         EffectGroup {
             for ((title, summary) in listOf("Equalizer" to "Custom - 10 bands", "Bass foundation" to "Deep bass",
                 "Immersive field" to "Wide stage", "Detail recovery" to "Clear transients")) {

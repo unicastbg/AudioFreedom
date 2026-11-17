@@ -354,8 +354,8 @@ internal fun SettingsScreen(
 
         SettingsSectionTitle("Device profiles")
         SettingsSwitchRow(
-            title = "Automatic profiles",
-            summary = "Apply the assigned profile when this output connects",
+            title = "Remember profile per device",
+            summary = "When an output connects, switch to the profile you last used on it",
             checked = preferences.automaticDeviceProfiles,
             onCheckedChange = {
                 onPreferencesChanged(preferences.copy(automaticDeviceProfiles = it))
@@ -367,9 +367,9 @@ internal fun SettingsScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Column(modifier = Modifier.weight(1F)) {
-                Text("Profile for ${route.label}", style = MaterialTheme.typography.bodyLarge)
+                Text("Comes back on ${route.label}", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    assignedProfile?.displayName ?: "Not assigned",
+                    assignedProfile?.displayName ?: "Nothing picked yet",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

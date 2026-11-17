@@ -46,21 +46,6 @@ class ProfileManagerUiTest {
         }
     }
 
-    @Test fun managementAndQuickPickerRemainAvailableAcrossThemes() {
-        val theme = mutableStateOf(AppTheme.Classic)
-        var opened = 0
-        compose.setContent { AudioFreedomTheme(ThemePreference.Dark, theme.value, controlSystemBars = false) {
-            ProfileBrowserRow(initial, "1", true, {}, {}, {}, { opened++ })
-        } }
-        for (value in AppTheme.entries) {
-            compose.runOnIdle { theme.value = value }
-            compose.onNodeWithContentDescription("Manage profiles").assertIsDisplayed().performClick()
-            compose.onNodeWithContentDescription("Choose profile").performClick()
-            compose.onNodeWithText("Manage", substring = false).performClick()
-        }
-        compose.runOnIdle { assertEquals(AppTheme.entries.size * 2, opened) }
-    }
-
     @Test fun saveDialogOffersExistingGroupsAndSeparateCreateAndUpdateModes() {
         val grouped = initial.map { it.copy(deviceGroup = "Sony Amp") }
         val id = mutableStateOf<String?>(null)

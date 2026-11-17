@@ -28,7 +28,7 @@ software effect chain.
 
 ## Features
 
-The latest release is **1.1.0**. See the [release notes](docs/releases/1.1.0.md)
+The latest release is **1.2.0**. See the [release notes](docs/releases/1.2.0.md)
 for what's new.
 
 - System-wide processing with automatic recovery when Android suspends the global effect
@@ -43,7 +43,7 @@ for what's new.
 - Live input, output, and gain-reduction meters
 - On-demand playback analysis with RMS, crest factor, stereo correlation, and a ten-band spectrum
 - Persistent, output-specific A/B snapshots for comparing DSP settings
-- Named profiles with optional automatic assignment by connected output, group management and multi-select moves
+- [Per-output profiles](docs/PROFILE_BROWSER.md) with quick switching, custom device-group names, and optional last-used recall
 - Phone speaker, wired, USB, HDMI, and Bluetooth route awareness in the app and notification
 - Twelve visual themes with a preview gallery and System, Light, and Dark modes where supported
 - Main-page customization: hide unused effects and keep them disabled while retaining their values

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0
+
+- Added quick profile switching and last-used profile recall for each output.
+- Reworked saving and the profile picker, with EQ previews and rename, move,
+  duplicate, and delete actions in each profile's menu.
+- Added custom names for output groups without changing device assignments.
+- Migrated existing profiles without deleting them. The bundled driver remains 1.1.0.
+
 ## 1.1.0
 
 - Preserved current DSP edits when the main activity is recreated on rotation;
